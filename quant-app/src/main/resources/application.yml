@@ -30,9 +30,15 @@ binance:
 
 # 风控配置
 risk:
-  max-order-amount: 100000
-  max-position: 10
-  max-order-per-minute: 60
+  max-order-amount: 100000     # 单笔最大金额(USDT)
+  max-position: 10             # 单品种最大持仓量
+  max-order-per-minute: 60     # 每分钟最大下单次数(按策略ID计)
+  fatal-loss-rate: 0.2         # 全局止损阈值(账户亏损20%时告警)
+  kline-timeout-seconds: 120   # 行情心跳超时秒数
+
+# 订单服务配置
+order:
+  max-position-per-strategy: 3  # 每个策略最大同时持仓订单数
 
 # 策略配置
 strategy:
@@ -44,3 +50,4 @@ strategy:
 logging:
   level:
     com.quant: DEBUG
+

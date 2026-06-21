@@ -13,21 +13,18 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 订单管理器
- * 负责订单的创建、提交、取消等核心业务逻辑
+ * 实盘订单管理器：实现 IOrderManager，走真实风控与数据库持久化
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class OrderManager {
+public class OrderManager implements IOrderManager {
 
     private final OrderRepository orderRepository;
     private final OrderStateMachine stateMachine;
     private final RiskEngine riskEngine;
 
-    /**
-     * 创建订单
-     */
+    @Override
     public Order createOrder(Order order) {
         order.setOrderId(UUID.randomUUID().toString().replace("-", ""));
         order.setStatus(OrderStatus.PENDING);
@@ -40,9 +37,7 @@ public class OrderManager {
         return order;
     }
 
-    /**
-     * 提交订单（含风控检查）
-     */
+    @Override
     public boolean submitOrder(String orderId) {
         Optional<Order> optOrder = orderRepository.findById(orderId);
         if (optOrder.isEmpty()) {
@@ -52,7 +47,6 @@ public class OrderManager {
 
         Order order = optOrder.get();
 
-        // 风控检查
         if (!riskEngine.check(order)) {
             stateMachine.transition(order, OrderStatus.REJECTED);
             order.setUpdateTime(LocalDateTime.now());
@@ -61,8 +55,11 @@ public class OrderManager {
             return false;
         }
 
-        // 状态转换
+        // 风控通过后冻结资金
+        riskEngine.freezeFunds(order);
+
         if (!stateMachine.transition(order, OrderStatus.SUBMITTED)) {
+            riskEngine.unfreezeFunds(order);
             return false;
         }
 
@@ -71,9 +68,7 @@ public class OrderManager {
         return true;
     }
 
-    /**
-     * 取消订单
-     */
+    @Override
     public boolean cancelOrder(String orderId) {
         Optional<Order> optOrder = orderRepository.findById(orderId);
         if (optOrder.isEmpty()) {
@@ -86,28 +81,24 @@ public class OrderManager {
             return false;
         }
 
+        // 撤单解冻资金
+        riskEngine.unfreezeFunds(order);
         order.setUpdateTime(LocalDateTime.now());
         orderRepository.save(order);
         return true;
     }
 
-    /**
-     * 查询订单
-     */
+    @Override
     public Optional<Order> getOrder(String orderId) {
         return orderRepository.findById(orderId);
     }
 
-    /**
-     * 查询策略相关订单
-     */
+    @Override
     public List<Order> getOrdersByStrategy(String strategyId) {
         return orderRepository.findByStrategyId(strategyId);
     }
 
-    /**
-     * 查询所有订单
-     */
+    @Override
     public List<Order> getAllOrders() {
         return orderRepository.findAll();
     }

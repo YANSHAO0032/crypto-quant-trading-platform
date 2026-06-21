@@ -1,3 +1,38 @@
+CREATE TABLE IF NOT EXISTS kline_range (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
+    symbol VARCHAR(32) NOT NULL COMMENT '交易对',
+    `interval` VARCHAR(16) NOT NULL COMMENT 'K线周期',
+    start_ms BIGINT NOT NULL COMMENT '数据起始时间戳(ms)',
+    end_ms BIGINT NOT NULL COMMENT '数据结束时间戳(ms)',
+    `count` BIGINT NOT NULL DEFAULT 0 COMMENT '数据条数',
+    continuous TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否连续完整',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_kline_range_symbol_interval (symbol, `interval`),
+    KEY idx_kline_range_time (start_ms, end_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='K线数据范围索引表';
+
+CREATE TABLE IF NOT EXISTS quant_inout_order (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
+    enter_order_id VARCHAR(64) NOT NULL COMMENT '开仓订单ID',
+    exit_order_id VARCHAR(64) NULL COMMENT '平仓订单ID',
+    strategy_id VARCHAR(128) NULL COMMENT '策略ID',
+    symbol VARCHAR(32) NOT NULL COMMENT '交易对',
+    side VARCHAR(16) NOT NULL COMMENT '方向',
+    enter_price DECIMAL(36,18) NULL COMMENT '开仓价格',
+    enter_qty DECIMAL(36,18) NULL COMMENT '开仓数量',
+    enter_time DATETIME(3) NULL COMMENT '开仓时间',
+    exit_price DECIMAL(36,18) NULL COMMENT '平仓价格',
+    exit_qty DECIMAL(36,18) NULL COMMENT '平仓数量',
+    exit_time DATETIME(3) NULL COMMENT '平仓时间',
+    realized_pnl DECIMAL(36,18) NULL COMMENT '已实现盈亏',
+    create_time DATETIME(3) NULL COMMENT '创建时间',
+    closed TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已平仓',
+    PRIMARY KEY (id),
+    KEY idx_inout_strategy_symbol (strategy_id, symbol),
+    KEY idx_inout_enter_order (enter_order_id),
+    KEY idx_inout_closed_time (closed, enter_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='进出一体交易记录表';
+
 CREATE TABLE IF NOT EXISTS quant_order (
     order_id VARCHAR(64) NOT NULL COMMENT '内部订单ID',
     exchange_order_id VARCHAR(128) NULL COMMENT '交易所订单ID',
