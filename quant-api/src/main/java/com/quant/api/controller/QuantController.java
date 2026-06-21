@@ -6,6 +6,7 @@ import com.quant.common.model.BacktestReport;
 import com.quant.common.model.Order;
 import com.quant.oms.IOrderManager;
 import com.quant.strategy.Strategy;
+import com.quant.strategy.StrategyRunner;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class QuantController {
 
     private final IOrderManager orderManager;
     private final BacktestEngine backtestEngine;
-    private final List<Strategy> strategies;
+    private final StrategyRunner strategyRunner;
 
     // ========== 订单接口 ==========
 
@@ -58,38 +59,41 @@ public class QuantController {
 
     @GetMapping("/strategies")
     public List<StrategyVO> listStrategies() {
-        return strategies.stream()
+        Map<String, String> running = strategyRunner.runningSnapshot();
+        return strategyRunner.getAll().stream()
                 .map(s -> StrategyVO.builder()
                         .strategyId(s.getStrategyId())
                         .strategyName(s.getStrategyName())
-                        .running(s.isRunning())
+                        .running(strategyRunner.isRunning(s.getStrategyId()))
+                        .symbol(running.get(s.getStrategyId()))
                         .build())
                 .toList();
     }
 
     @PostMapping("/strategies/{strategyId}/start")
-    public ResponseEntity<Map<String, Object>> startStrategy(@PathVariable String strategyId) {
-        Strategy strategy = findStrategy(strategyId);
-        if (strategy == null) {
+    public ResponseEntity<Map<String, Object>> startStrategy(
+            @PathVariable String strategyId,
+            @RequestParam String symbol) {
+
+        if (strategyRunner.findById(strategyId).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-        if (strategy.isRunning()) {
+        if (strategyRunner.isRunning(strategyId)) {
             return ResponseEntity.ok(Map.of("success", false, "message", "策略已在运行中"));
         }
-        strategy.init();
-        return ResponseEntity.ok(Map.of("success", true, "strategyId", strategyId));
+        strategyRunner.start(strategyId, symbol);
+        return ResponseEntity.ok(Map.of("success", true, "strategyId", strategyId, "symbol", symbol));
     }
 
     @PostMapping("/strategies/{strategyId}/stop")
     public ResponseEntity<Map<String, Object>> stopStrategy(@PathVariable String strategyId) {
-        Strategy strategy = findStrategy(strategyId);
-        if (strategy == null) {
+        if (strategyRunner.findById(strategyId).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-        if (!strategy.isRunning()) {
+        if (!strategyRunner.isRunning(strategyId)) {
             return ResponseEntity.ok(Map.of("success", false, "message", "策略未在运行"));
         }
-        strategy.stop();
+        strategyRunner.stop(strategyId);
         return ResponseEntity.ok(Map.of("success", true, "strategyId", strategyId));
     }
 
@@ -103,22 +107,13 @@ public class QuantController {
             @RequestParam(defaultValue = "65000") BigDecimal startPrice,
             @RequestParam(defaultValue = "100000") BigDecimal capital) {
 
-        Strategy strategy = findStrategy(strategyId);
+        Strategy strategy = strategyRunner.findById(strategyId).orElse(null);
         if (strategy == null) {
             return ResponseEntity.notFound().build();
         }
-        if (strategy.isRunning()) {
+        if (strategyRunner.isRunning(strategyId)) {
             return ResponseEntity.badRequest().build();
         }
-
-        BacktestReport report = backtestEngine.quickBacktest(strategy, symbol, dataCount, startPrice, capital);
-        return ResponseEntity.ok(report);
-    }
-
-    private Strategy findStrategy(String strategyId) {
-        return strategies.stream()
-                .filter(s -> s.getStrategyId().equals(strategyId))
-                .findFirst()
-                .orElse(null);
+        return ResponseEntity.ok(backtestEngine.quickBacktest(strategy, symbol, dataCount, startPrice, capital));
     }
 }

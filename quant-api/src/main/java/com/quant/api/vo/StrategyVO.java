@@ -9,4 +9,5 @@ public class StrategyVO {
     private String strategyId;
     private String strategyName;
     private boolean running;
+    private String symbol;
 }
