@@ -1,12 +1,11 @@
 package com.quant.api.controller;
 
+import com.quant.api.vo.StrategyVO;
 import com.quant.backtest.BacktestEngine;
 import com.quant.common.model.BacktestReport;
 import com.quant.common.model.Order;
 import com.quant.oms.IOrderManager;
 import com.quant.strategy.Strategy;
-import lombok.Builder;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -121,13 +120,5 @@ public class QuantController {
                 .filter(s -> s.getStrategyId().equals(strategyId))
                 .findFirst()
                 .orElse(null);
-    }
-
-    @Data
-    @Builder
-    public static class StrategyVO {
-        private String strategyId;
-        private String strategyName;
-        private boolean running;
     }
 }
