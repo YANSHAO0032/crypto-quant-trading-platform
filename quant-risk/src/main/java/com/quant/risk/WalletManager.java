@@ -1,11 +1,9 @@
 package com.quant.risk;
 
-import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -103,16 +101,5 @@ public class WalletManager {
 
     private String normalize(String asset) {
         return asset == null ? "UNKNOWN" : asset.toUpperCase();
-    }
-
-    @Data
-    private static class AssetWallet {
-        private BigDecimal available;
-        private BigDecimal frozen;
-
-        AssetWallet(BigDecimal available, BigDecimal frozen) {
-            this.available = available;
-            this.frozen = frozen;
-        }
     }
 }
