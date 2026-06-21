@@ -4,11 +4,8 @@ server:
 spring:
   application:
     name: crypto-quant-trading-platform
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/quant-trading-platform?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
-    password: 3196278
+  profiles:
+    active: dev
 
 # MyBatis-Plus配置
 mybatis-plus:
@@ -46,8 +43,3 @@ strategy:
     upper-price: 70000
     lower-price: 60000
     grid-count: 10
-
-logging:
-  level:
-    com.quant: DEBUG
-
