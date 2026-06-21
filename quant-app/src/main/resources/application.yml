@@ -1,0 +1,46 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: crypto-quant-trading-platform
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/quant-trading-platform?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: 3196278
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.quant.common.model
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: assign_id
+
+# Binance API配置
+binance:
+  api-key: ${BINANCE_API_KEY:}
+  secret-key: ${BINANCE_SECRET_KEY:}
+  base-url: https://api.binance.com
+  ws-url: wss://stream.binance.com:9443/ws
+
+# 风控配置
+risk:
+  max-order-amount: 100000
+  max-position: 10
+  max-order-per-minute: 60
+
+# 策略配置
+strategy:
+  grid:
+    upper-price: 70000
+    lower-price: 60000
+    grid-count: 10
+
+logging:
+  level:
+    com.quant: DEBUG
