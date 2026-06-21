@@ -4,15 +4,17 @@ import com.quant.common.enums.OrderStatus;
 import com.quant.common.model.Order;
 import com.quant.oms.OrderManager;
 import com.quant.oms.OrderRepository;
+import com.quant.oms.event.OrderSubmittedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
 /**
- * 执行服务
- * 负责将OMS订单发送到交易所执行
+ * 执行服务：监听 OrderSubmittedEvent，将订单发往交易所。
  */
 @Slf4j
 @Service
@@ -24,7 +26,16 @@ public class ExecutionService {
     private final OrderRepository orderRepository;
 
     /**
-     * 执行订单
+     * 监听订单提交事件，异步将订单发往交易所。
+     */
+    @Async
+    @EventListener
+    public void onOrderSubmitted(OrderSubmittedEvent event) {
+        executeOrder(event.getOrderId());
+    }
+
+    /**
+     * 将订单发送到交易所执行。
      */
     public void executeOrder(String orderId) {
         orderRepository.findById(orderId).ifPresentOrElse(order -> {
@@ -35,9 +46,13 @@ public class ExecutionService {
 
             try {
                 String exchangeOrderId = exchangeClient.sendOrder(order);
-                order.setExchangeOrderId(exchangeOrderId);
+                if (exchangeOrderId == null) {
+                    order.setStatus(OrderStatus.REJECTED);
+                    order.setRemark("交易所拒绝");
+                } else {
+                    order.setExchangeOrderId(exchangeOrderId);
+                }
                 order.setUpdateTime(LocalDateTime.now());
-                log.info("订单已发送到交易所: orderId={}, exchangeOrderId={}", orderId, exchangeOrderId);
             } catch (Exception e) {
                 log.error("订单执行异常: orderId={}", orderId, e);
                 order.setStatus(OrderStatus.REJECTED);
@@ -49,7 +64,7 @@ public class ExecutionService {
     }
 
     /**
-     * 撤销交易所订单
+     * 撤销交易所订单。
      */
     public boolean cancelExchangeOrder(String orderId) {
         return orderManager.getOrder(orderId).map(order -> {

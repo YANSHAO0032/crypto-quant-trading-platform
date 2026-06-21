@@ -1,5 +1,6 @@
 package com.quant.backtest;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.backtest.mapper.BacktestReportMapper;
 import com.quant.backtest.mapper.BacktestTradeRecordMapper;
 import com.quant.common.enums.Signal;
@@ -74,11 +75,45 @@ public class BacktestEngine {
         return report;
     }
 
+    /**
+     * 使用数据库中的真实历史数据做回测；若DB无数据则降级为模拟数据。
+     */
     @Transactional(rollbackFor = Exception.class)
     public BacktestReport quickBacktest(Strategy strategy, String symbol, int dataCount,
                                         BigDecimal startPrice, BigDecimal initialCapital) {
-        List<TickData> mockData = dataLoader.generateMockData(symbol, dataCount, startPrice);
-        return runBacktest(strategy, mockData, initialCapital);
+        List<TickData> data = dataLoader.loadFromDb(symbol, "1m", dataCount);
+        if (data.isEmpty()) {
+            log.info("数据库无历史数据，降级使用模拟数据: symbol={}, count={}", symbol, dataCount);
+            data = dataLoader.generateMockData(symbol, dataCount, startPrice);
+        }
+        return runBacktest(strategy, data, initialCapital);
+    }
+
+    /**
+     * 使用 CSV 文件数据做回测。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public BacktestReport csvBacktest(Strategy strategy, String csvFilePath, String symbol, BigDecimal initialCapital) {
+        List<TickData> data = dataLoader.loadFromCsv(csvFilePath, symbol);
+        if (data.isEmpty()) {
+            throw new IllegalArgumentException("CSV文件无有效数据: " + csvFilePath);
+        }
+        return runBacktest(strategy, data, initialCapital);
+    }
+
+    /**
+     * 查询历史回测报告列表。
+     */
+    public List<BacktestReport> listReports(String strategyId, int limit) {
+        LambdaQueryWrapper<BacktestReport> wrapper = new LambdaQueryWrapper<BacktestReport>()
+                .orderByDesc(BacktestReport::getCreateTime);
+        if (strategyId != null && !strategyId.isBlank()) {
+            wrapper.eq(BacktestReport::getStrategyId, strategyId);
+        }
+        if (limit > 0) {
+            wrapper.last("LIMIT " + limit);
+        }
+        return backtestReportMapper.selectList(wrapper);
     }
 
     private void persistReport(BacktestReport report) {

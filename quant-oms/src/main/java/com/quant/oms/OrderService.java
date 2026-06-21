@@ -33,6 +33,7 @@ public class OrderService {
     private final OrderManager orderManager;
     private final OrderRepository orderRepository;
     private final TradeMapper tradeMapper;
+    private final InOutOrderService inOutOrderService;
     private final List<Strategy> strategies;
 
     @Value("${order.max-position-per-strategy:3}")
@@ -74,6 +75,9 @@ public class OrderService {
         return created;
     }
 
+    /**
+     * 开仓成交回调：更新订单状态、插入成交记录、创建 InOutOrder、通知策略。
+     */
     public void onFill(String orderId, BigDecimal filledQty, BigDecimal avgPrice) {
         orderRepository.findById(orderId).ifPresent(order -> {
             order.setFilledQuantity(filledQty);
@@ -83,21 +87,19 @@ public class OrderService {
                     ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED);
             orderRepository.save(order);
 
-            tradeMapper.insert(Trade.builder()
-                    .tradeId(UUID.randomUUID().toString().replace("-", ""))
-                    .orderId(orderId)
-                    .symbol(order.getSymbol())
-                    .side(order.getSide())
-                    .price(avgPrice)
-                    .quantity(filledQty)
-                    .tradeTime(LocalDateTime.now())
-                    .build());
+            insertTradeRecord(order, filledQty, avgPrice);
+
+            // 创建 InOutOrder 开仓记录
+            inOutOrderService.recordOpen(order);
 
             notifyOrderChange(order, order.getStrategyId(), OrderChangeType.ENTER_FILL);
-            log.info("订单成交更新: orderId={}, filledQty={}, avgPrice={}", orderId, filledQty, avgPrice);
+            log.info("开仓成交: orderId={}, filledQty={}, avgPrice={}", orderId, filledQty, avgPrice);
         });
     }
 
+    /**
+     * 平仓成交回调：更新订单状态、插入成交记录、关闭 InOutOrder、通知策略。
+     */
     public void onExitFill(String orderId, BigDecimal filledQty, BigDecimal avgPrice) {
         orderRepository.findById(orderId).ifPresent(order -> {
             order.setFilledQuantity(filledQty);
@@ -105,6 +107,11 @@ public class OrderService {
             order.setStatus(OrderStatus.FILLED);
             order.setUpdateTime(LocalDateTime.now());
             orderRepository.save(order);
+
+            insertTradeRecord(order, filledQty, avgPrice);
+
+            // 关闭 InOutOrder 平仓记录，计算盈亏
+            inOutOrderService.recordClose(order);
 
             String strategyId = order.getStrategyId();
             if (strategyId != null) {
@@ -117,6 +124,18 @@ public class OrderService {
             notifyOrderChange(order, strategyId, OrderChangeType.EXIT_FILL);
             log.info("平仓成交: orderId={}, filledQty={}, avgPrice={}", orderId, filledQty, avgPrice);
         });
+    }
+
+    private void insertTradeRecord(Order order, BigDecimal filledQty, BigDecimal avgPrice) {
+        tradeMapper.insert(Trade.builder()
+                .tradeId(UUID.randomUUID().toString().replace("-", ""))
+                .orderId(order.getOrderId())
+                .symbol(order.getSymbol())
+                .side(order.getSide())
+                .price(avgPrice)
+                .quantity(filledQty)
+                .tradeTime(LocalDateTime.now())
+                .build());
     }
 
     private void notifyOrderChange(Order order, String strategyId, OrderChangeType changeType) {

@@ -50,5 +50,5 @@ public class Trade {
     private LocalDateTime tradeTime;
 
     /** 是否为maker */
-    private boolean maker;
+    private Boolean maker;
 }

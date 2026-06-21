@@ -2,9 +2,11 @@ package com.quant.oms;
 
 import com.quant.common.enums.OrderStatus;
 import com.quant.common.model.Order;
+import com.quant.oms.event.OrderSubmittedEvent;
 import com.quant.risk.RiskEngine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -13,7 +15,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 实盘订单管理器：实现 IOrderManager，走真实风控与数据库持久化
+ * 实盘订单管理器：实现 IOrderManager，走真实风控与数据库持久化。
+ * 提交成功后发布 OrderSubmittedEvent，由 ExecutionService 监听并发往交易所。
  */
 @Slf4j
 @Service
@@ -23,6 +26,7 @@ public class OrderManager implements IOrderManager {
     private final OrderRepository orderRepository;
     private final OrderStateMachine stateMachine;
     private final RiskEngine riskEngine;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public Order createOrder(Order order) {
@@ -55,7 +59,6 @@ public class OrderManager implements IOrderManager {
             return false;
         }
 
-        // 风控通过后冻结资金
         riskEngine.freezeFunds(order);
 
         if (!stateMachine.transition(order, OrderStatus.SUBMITTED)) {
@@ -65,6 +68,9 @@ public class OrderManager implements IOrderManager {
 
         order.setUpdateTime(LocalDateTime.now());
         orderRepository.save(order);
+
+        // 发布事件，ExecutionService 监听后将订单发往交易所
+        eventPublisher.publishEvent(new OrderSubmittedEvent(this, orderId));
         return true;
     }
 
@@ -81,7 +87,6 @@ public class OrderManager implements IOrderManager {
             return false;
         }
 
-        // 撤单解冻资金
         riskEngine.unfreezeFunds(order);
         order.setUpdateTime(LocalDateTime.now());
         orderRepository.save(order);

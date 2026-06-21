@@ -23,7 +23,9 @@ binance:
   api-key: ${BINANCE_API_KEY:}
   secret-key: ${BINANCE_SECRET_KEY:}
   base-url: https://api.binance.com
-  ws-url: wss://stream.binance.com:9443/ws
+  ws-url: wss://stream.binance.com:9443/ws/
+  user-stream:
+    enabled: false  # 实盘时设为 true，需配置有效 api-key
 
 # 风控配置
 risk:
@@ -37,8 +39,13 @@ risk:
 order:
   max-position-per-strategy: 3  # 每个策略最大同时持仓订单数
 
+# 钱包配置
+wallet:
+  default-usdt: 10000  # API Key未配置时的默认初始USDT余额
+
 # 策略配置
 strategy:
+  order-quantity: 0.001  # 每笔订单名义数量（BTC单位），实盘应按资金动态计算
   grid:
     upper-price: 70000
     lower-price: 60000

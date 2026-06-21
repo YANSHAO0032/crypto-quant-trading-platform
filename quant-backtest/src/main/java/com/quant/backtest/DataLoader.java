@@ -1,6 +1,8 @@
 package com.quant.backtest;
 
 import com.quant.common.model.TickData;
+import com.quant.market.MarketDataService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -12,19 +14,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 历史数据加载器
- * 从CSV文件加载历史行情数据用于回测
+ * 历史数据加载器。
+ * 支持三种数据源：CSV 文件、数据库（MarketDataService）、模拟数据。
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class DataLoader {
 
+    private final MarketDataService marketDataService;
+
     /**
-     * 从CSV文件加载K线数据
+     * 从数据库加载历史 K 线数据（优先使用真实数据）。
+     */
+    public List<TickData> loadFromDb(String symbol, String interval, int limit) {
+        List<TickData> data = marketDataService.getHistoricalKlines(symbol, interval, limit);
+        log.info("从数据库加载历史K线: symbol={}, interval={}, 实际条数={}", symbol, interval, data.size());
+        return data;
+    }
+
+    /**
+     * 从CSV文件加载K线数据。
      * 格式: timestamp,open,high,low,close,volume
-     * @param filePath CSV文件路径
-     * @param symbol 交易对
-     * @return TickData列表
      */
     public List<TickData> loadFromCsv(String filePath, String symbol) {
         List<TickData> dataList = new ArrayList<>();
@@ -44,7 +55,7 @@ public class DataLoader {
 
                 TickData tick = TickData.builder()
                         .symbol(symbol)
-                        .interval("TICK")
+                        .interval("1m")
                         .timestamp(Long.parseLong(parts[0].trim()))
                         .openPrice(new BigDecimal(parts[1].trim()))
                         .highPrice(new BigDecimal(parts[2].trim()))
@@ -56,23 +67,23 @@ public class DataLoader {
                 dataList.add(tick);
             }
 
-            log.info("数据加载完成: file={}, records={}", filePath, dataList.size());
+            log.info("从CSV加载K线完成: file={}, records={}", filePath, dataList.size());
         } catch (IOException e) {
-            log.error("数据加载失败: {}", filePath, e);
+            log.error("CSV数据加载失败: {}", filePath, e);
         }
 
         return dataList;
     }
 
     /**
-     * 生成模拟数据（用于测试）
+     * 生成模拟数据（无真实历史数据时的fallback）。
      */
     public List<TickData> generateMockData(String symbol, int count, BigDecimal startPrice) {
         List<TickData> dataList = new ArrayList<>();
         BigDecimal price = startPrice;
 
         for (int i = 0; i < count; i++) {
-            double change = (Math.random() - 0.48) * 100; // 轻微上涨偏向
+            double change = (Math.random() - 0.48) * 100;
             price = price.add(BigDecimal.valueOf(change));
             if (price.compareTo(BigDecimal.ZERO) <= 0) {
                 price = startPrice;

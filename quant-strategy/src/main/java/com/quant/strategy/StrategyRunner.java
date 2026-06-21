@@ -1,11 +1,16 @@
 package com.quant.strategy;
 
 import com.quant.common.enums.Signal;
+import com.quant.common.model.TickData;
 import com.quant.market.MarketDataService;
+import com.quant.market.websocket.BinanceWebSocketClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,10 +20,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * 策略运行管理器。
  *
  * 负责策略完整生命周期：
- *   start(strategyId, symbol) → init() + marketDataService.subscribe()
+ *   start(strategyId, symbol) → init() + WS connect + marketDataService.subscribe()
  *   stop(strategyId)          → strategy.stop() + marketDataService.unsubscribe()
  *
- * 维护 strategyId → symbol 的运行映射，作为"哪些策略当前在跑哪个交易对"的唯一状态源。
+ * 信号通过 SignalEvent 事件发布，由 quant-oms 的 SignalOrderHandler 监听并下单，
+ * 实现策略模块与OMS模块解耦。
  */
 @Slf4j
 @Component
@@ -27,6 +33,12 @@ public class StrategyRunner {
 
     private final List<Strategy> strategies;
     private final MarketDataService marketDataService;
+    private final BinanceWebSocketClient webSocketClient;
+    private final ApplicationEventPublisher eventPublisher;
+
+    /** 每笔订单的名义数量（可配置，真实项目中应按资金和价格动态计算） */
+    @Value("${strategy.order-quantity:0.001}")
+    private BigDecimal orderQuantity;
 
     /** strategyId → 当前订阅的 symbol */
     private final Map<String, String> runningMap = new ConcurrentHashMap<>();
@@ -42,7 +54,7 @@ public class StrategyRunner {
     }
 
     /**
-     * 启动策略：初始化状态 + 订阅行情（含 onCheckExit 联动）。
+     * 启动策略：初始化状态 + 建立WebSocket行情连接 + 订阅行情（含 onCheckExit 联动）。
      *
      * @return false 表示策略不存在或已在运行
      */
@@ -59,16 +71,13 @@ public class StrategyRunner {
         }
 
         strategy.init();
-        marketDataService.subscribe(symbol, tick -> {
-            Signal signal = strategy.onTick(tick);
-            if (signal == Signal.HOLD) {
-                signal = strategy.onCheckExit(tick);
-            }
-            if (signal != Signal.HOLD) {
-                log.info("策略信号: strategyId={}, symbol={}, signal={}, price={}",
-                        strategyId, symbol, signal, tick.getLastPrice());
-            }
-        });
+
+        // 建立 WebSocket 行情连接（幂等：WebSocketClient内部按symbol管理连接）
+        webSocketClient.connect(symbol);
+
+        // 注册行情回调：onTick → 信号 → 发布 SignalEvent → OMS下单
+        marketDataService.subscribe(symbol, tick -> handleTick(strategy, strategyId, symbol, tick));
+
         runningMap.put(strategyId, symbol);
         log.info("策略已启动: strategyId={}, symbol={}", strategyId, symbol);
         return true;
@@ -92,7 +101,13 @@ public class StrategyRunner {
         }
 
         opt.get().stop();
-        marketDataService.unsubscribe(symbol);
+
+        // 仅当该symbol没有其他策略在跑时，才取消订阅
+        boolean symbolStillNeeded = runningMap.values().stream().anyMatch(s -> s.equals(symbol));
+        if (!symbolStillNeeded) {
+            marketDataService.unsubscribe(symbol);
+        }
+
         log.info("策略已停止: strategyId={}, symbol={}", strategyId, symbol);
         return true;
     }
@@ -104,5 +119,19 @@ public class StrategyRunner {
     /** 当前运行的策略快照：strategyId → symbol */
     public Map<String, String> runningSnapshot() {
         return Map.copyOf(runningMap);
+    }
+
+    private void handleTick(Strategy strategy, String strategyId, String symbol, TickData tick) {
+        Signal signal = strategy.onTick(tick);
+        if (signal == Signal.HOLD) {
+            signal = strategy.onCheckExit(tick);
+        }
+        if (signal != Signal.HOLD) {
+            log.info("策略信号: strategyId={}, symbol={}, signal={}, price={}",
+                    strategyId, symbol, signal, tick.getLastPrice());
+            // 发布信号事件，由 SignalOrderHandler（quant-oms）监听并下单，保持模块解耦
+            eventPublisher.publishEvent(
+                    new SignalEvent(this, strategyId, symbol, signal, tick.getLastPrice(), orderQuantity));
+        }
     }
 }

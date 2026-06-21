@@ -16,11 +16,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Binance WebSocket 行情客户端。
+ * 支持多标的并发订阅，每个 symbol 维护独立的 WebSocket 连接和重连状态。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -34,22 +40,32 @@ public class BinanceWebSocketClient {
     private final ScheduledExecutorService reconnectScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "ws-reconnect"));
 
-    private WebSocket webSocket;
-    private String currentSymbol;
-    private final AtomicBoolean intentionalClose = new AtomicBoolean(false);
+    /** symbol → 当前 WebSocket 连接 */
+    private final Map<String, WebSocket> connections = new ConcurrentHashMap<>();
+    /** symbol → 是否主动关闭（防止重连） */
+    private final Map<String, AtomicBoolean> intentionalCloseFlags = new ConcurrentHashMap<>();
 
+    /**
+     * 连接指定 symbol 的行情 WebSocket（幂等：已连接则跳过）。
+     */
     public void connect(String symbol) {
-        this.currentSymbol = symbol;
-        intentionalClose.set(false);
-        doConnect(symbol);
+        String normalized = symbol.toLowerCase();
+        if (connections.containsKey(normalized)) {
+            log.debug("WebSocket已连接，跳过: {}", symbol);
+            return;
+        }
+        intentionalCloseFlags.computeIfAbsent(normalized, k -> new AtomicBoolean(false))
+                .set(false);
+        doConnect(normalized);
     }
 
     private void doConnect(String symbol) {
-        String url = wsBaseUrl + symbol.toLowerCase() + "@ticker";
+        String url = wsBaseUrl + symbol + "@ticker";
         Request request = new Request.Builder().url(url).build();
-        webSocket = httpClient.newWebSocket(request, new WebSocketListener() {
+        WebSocket ws = httpClient.newWebSocket(request, new WebSocketListener() {
             @Override
             public void onOpen(WebSocket webSocket, Response response) {
+                connections.put(symbol, webSocket);
                 log.info("WebSocket已连接: {}", symbol);
             }
 
@@ -58,47 +74,61 @@ public class BinanceWebSocketClient {
                 try {
                     marketDataService.onTickReceived(parseTickData(text));
                 } catch (Exception e) {
-                    log.error("解析WebSocket消息异常", e);
+                    log.error("解析WebSocket消息异常: symbol={}", symbol, e);
                 }
             }
 
             @Override
             public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+                connections.remove(symbol);
                 log.error("WebSocket连接异常: {}", symbol, t);
-                scheduleReconnect();
+                scheduleReconnect(symbol);
             }
 
             @Override
             public void onClosed(WebSocket webSocket, int code, String reason) {
+                connections.remove(symbol);
                 log.info("WebSocket已关闭: {} code={} reason={}", symbol, code, reason);
-                if (!intentionalClose.get()) {
-                    scheduleReconnect();
+                AtomicBoolean flag = intentionalCloseFlags.get(symbol);
+                if (flag == null || !flag.get()) {
+                    scheduleReconnect(symbol);
                 }
             }
         });
+        connections.putIfAbsent(symbol, ws);
     }
 
-    private void scheduleReconnect() {
-        if (intentionalClose.get() || currentSymbol == null) return;
-        log.info("WebSocket将在5秒后重连: {}", currentSymbol);
+    private void scheduleReconnect(String symbol) {
+        AtomicBoolean flag = intentionalCloseFlags.get(symbol);
+        if (flag != null && flag.get()) return;
+        log.info("WebSocket将在5秒后重连: {}", symbol);
         reconnectScheduler.schedule(() -> {
-            if (!intentionalClose.get()) {
-                log.info("WebSocket重连中: {}", currentSymbol);
-                doConnect(currentSymbol);
+            AtomicBoolean f = intentionalCloseFlags.get(symbol);
+            if (f == null || !f.get()) {
+                log.info("WebSocket重连中: {}", symbol);
+                doConnect(symbol);
             }
         }, 5, TimeUnit.SECONDS);
     }
 
-    public void disconnect() {
-        intentionalClose.set(true);
-        if (webSocket != null) {
-            webSocket.close(1000, "Client disconnect");
+    /**
+     * 断开指定 symbol 的连接。
+     */
+    public void disconnect(String symbol) {
+        String normalized = symbol.toLowerCase();
+        AtomicBoolean flag = intentionalCloseFlags.computeIfAbsent(normalized, k -> new AtomicBoolean(false));
+        flag.set(true);
+        WebSocket ws = connections.remove(normalized);
+        if (ws != null) {
+            ws.close(1000, "Client disconnect");
         }
     }
 
     @PreDestroy
     public void destroy() {
-        disconnect();
+        intentionalCloseFlags.values().forEach(f -> f.set(true));
+        connections.forEach((symbol, ws) -> ws.close(1000, "Shutdown"));
+        connections.clear();
         reconnectScheduler.shutdownNow();
     }
 

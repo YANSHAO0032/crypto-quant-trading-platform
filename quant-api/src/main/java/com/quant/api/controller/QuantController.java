@@ -5,6 +5,9 @@ import com.quant.backtest.BacktestEngine;
 import com.quant.common.model.BacktestReport;
 import com.quant.common.model.Order;
 import com.quant.oms.IOrderManager;
+import com.quant.oms.InOutOrderService;
+import com.quant.risk.PositionManager;
+import com.quant.risk.WalletManager;
 import com.quant.strategy.Strategy;
 import com.quant.strategy.StrategyRunner;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +26,9 @@ public class QuantController {
     private final IOrderManager orderManager;
     private final BacktestEngine backtestEngine;
     private final StrategyRunner strategyRunner;
+    private final PositionManager positionManager;
+    private final WalletManager walletManager;
+    private final InOutOrderService inOutOrderService;
 
     // ========== 订单接口 ==========
 
@@ -97,6 +103,54 @@ public class QuantController {
         return ResponseEntity.ok(Map.of("success", true, "strategyId", strategyId));
     }
 
+    // ========== 仓位接口 ==========
+
+    @GetMapping("/positions")
+    public Map<String, BigDecimal> listPositions() {
+        return positionManager.getAllPositions();
+    }
+
+    @GetMapping("/positions/{symbol}")
+    public Map<String, Object> getPosition(@PathVariable String symbol) {
+        BigDecimal qty = positionManager.getPosition(symbol);
+        return Map.of("symbol", symbol, "quantity", qty);
+    }
+
+    // ========== 钱包接口 ==========
+
+    @GetMapping("/wallet")
+    public Map<String, BigDecimal[]> getWallet() {
+        return walletManager.snapshot();
+    }
+
+    @GetMapping("/wallet/{asset}")
+    public Map<String, Object> getAssetBalance(@PathVariable String asset) {
+        return Map.of(
+                "asset", asset.toUpperCase(),
+                "available", walletManager.getAvailable(asset),
+                "frozen", walletManager.getFrozen(asset),
+                "total", walletManager.getTotal(asset)
+        );
+    }
+
+    // ========== InOutOrder 接口 ==========
+
+    @GetMapping("/trades/{strategyId}/open")
+    public Object getOpenTrades(@PathVariable String strategyId) {
+        return inOutOrderService.getOpenRecords(strategyId);
+    }
+
+    @GetMapping("/trades/{strategyId}/closed")
+    public Object getClosedTrades(@PathVariable String strategyId) {
+        return inOutOrderService.getClosedRecords(strategyId);
+    }
+
+    @GetMapping("/trades/{strategyId}/pnl")
+    public Map<String, Object> getTotalPnl(@PathVariable String strategyId) {
+        return Map.of("strategyId", strategyId,
+                "totalRealizedPnl", inOutOrderService.getTotalRealizedPnl(strategyId));
+    }
+
     // ========== 回测接口 ==========
 
     @PostMapping("/backtest/{strategyId}")
@@ -115,5 +169,12 @@ public class QuantController {
             return ResponseEntity.badRequest().build();
         }
         return ResponseEntity.ok(backtestEngine.quickBacktest(strategy, symbol, dataCount, startPrice, capital));
+    }
+
+    @GetMapping("/backtest")
+    public List<BacktestReport> listBacktestReports(
+            @RequestParam(required = false) String strategyId,
+            @RequestParam(defaultValue = "20") int limit) {
+        return backtestEngine.listReports(strategyId, limit);
     }
 }
