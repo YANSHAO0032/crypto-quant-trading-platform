@@ -1,5 +1,6 @@
 package com.quant.strategy;
 
+import com.quant.common.enums.OrderChangeType;
 import com.quant.common.enums.Signal;
 import com.quant.common.model.Order;
 import com.quant.common.model.TickData;
@@ -34,21 +35,10 @@ public interface Strategy {
      * 策略可感知自己下的单是否成交，并据此调整后续逻辑。
      */
     default void onOrderChange(Order order, OrderChangeType changeType) {
-        // 默认空实现，子类按需覆盖
     }
 
     /** 策略停止（清理资源、平掉所有持仓信号） */
     void stop();
 
     boolean isRunning();
-
-    /** 订单变更类型 */
-    enum OrderChangeType {
-        NEW,          // 新建订单
-        ENTER_FILL,   // 开仓成交
-        EXIT_FILL,    // 平仓成交
-        CANCELLED,    // 撤单
-        REJECTED      // 风控拒绝
-    }
 }
-

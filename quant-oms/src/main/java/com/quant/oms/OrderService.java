@@ -1,5 +1,6 @@
 package com.quant.oms;
 
+import com.quant.common.enums.OrderChangeType;
 import com.quant.common.enums.OrderSide;
 import com.quant.common.enums.OrderStatus;
 import com.quant.common.enums.OrderType;
@@ -60,12 +61,12 @@ public class OrderService {
                 .build();
 
         Order created = orderManager.createOrder(order);
-        notifyOrderChange(created, strategyId, Strategy.OrderChangeType.NEW);
+        notifyOrderChange(created, strategyId, OrderChangeType.NEW);
 
         boolean submitted = orderManager.submitOrder(created.getOrderId());
         if (!submitted) {
             log.warn("订单提交失败: orderId={}", created.getOrderId());
-            notifyOrderChange(created, strategyId, Strategy.OrderChangeType.REJECTED);
+            notifyOrderChange(created, strategyId, OrderChangeType.REJECTED);
             return null;
         }
 
@@ -92,7 +93,7 @@ public class OrderService {
                     .tradeTime(LocalDateTime.now())
                     .build());
 
-            notifyOrderChange(order, order.getStrategyId(), Strategy.OrderChangeType.ENTER_FILL);
+            notifyOrderChange(order, order.getStrategyId(), OrderChangeType.ENTER_FILL);
             log.info("订单成交更新: orderId={}, filledQty={}, avgPrice={}", orderId, filledQty, avgPrice);
         });
     }
@@ -113,12 +114,12 @@ public class OrderService {
                 });
             }
 
-            notifyOrderChange(order, strategyId, Strategy.OrderChangeType.EXIT_FILL);
+            notifyOrderChange(order, strategyId, OrderChangeType.EXIT_FILL);
             log.info("平仓成交: orderId={}, filledQty={}, avgPrice={}", orderId, filledQty, avgPrice);
         });
     }
 
-    private void notifyOrderChange(Order order, String strategyId, Strategy.OrderChangeType changeType) {
+    private void notifyOrderChange(Order order, String strategyId, OrderChangeType changeType) {
         if (strategyId == null) return;
         strategies.stream()
                 .filter(s -> strategyId.equals(s.getStrategyId()))
