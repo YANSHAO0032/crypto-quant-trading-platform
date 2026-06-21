@@ -63,6 +63,15 @@ public class BacktestReport {
     /** 盈亏比。 */
     private BigDecimal profitFactor;
 
+    /** 年化收益率。 */
+    private BigDecimal annualizedReturn;
+
+    /** 夏普比率。 */
+    private BigDecimal sharpeRatio;
+
+    /** 索提诺比率。 */
+    private BigDecimal sortinoRatio;
+
     /** 开始时间。 */
     private LocalDateTime startTime;
 
