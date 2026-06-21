@@ -43,3 +43,10 @@ strategy:
     upper-price: 70000
     lower-price: 60000
     grid-count: 10
+  ma:
+    short-period: 5
+    long-period: 20
+  rsi:
+    period: 14
+    oversold: 30
+    overbought: 70

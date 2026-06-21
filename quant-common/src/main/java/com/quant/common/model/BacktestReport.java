@@ -20,64 +20,64 @@ import java.time.LocalDateTime;
 @TableName("backtest_report")
 public class BacktestReport {
 
-    /** 回测ID。 */
+    /** 回测ID */
     @TableId
     private String backtestId;
 
-    /** 策略ID。 */
+    /** 策略ID */
     private String strategyId;
 
-    /** 策略名称。 */
+    /** 策略名称 */
     private String strategyName;
 
-    /** 交易对。 */
+    /** 交易对 */
     private String symbol;
 
-    /** 数据条数。 */
+    /** 数据条数 */
     private Integer dataCount;
 
-    /** 初始资金。 */
+    /** 初始资金 */
     private BigDecimal initialCapital;
 
-    /** 最终资金。 */
+    /** 最终资金 */
     private BigDecimal finalCapital;
 
-    /** 总收益率。 */
+    /** 总收益率 */
     private BigDecimal totalReturn;
 
-    /** 总交易次数。 */
+    /** 总交易次数 */
     private Integer totalTrades;
 
-    /** 盈利次数。 */
+    /** 盈利次数 */
     private Integer winCount;
 
-    /** 亏损次数。 */
+    /** 亏损次数 */
     private Integer lossCount;
 
-    /** 胜率。 */
+    /** 胜率 */
     private BigDecimal winRate;
 
-    /** 最大回撤。 */
+    /** 最大回撤 */
     private BigDecimal maxDrawdown;
 
-    /** 盈亏比。 */
+    /** 盈亏比 */
     private BigDecimal profitFactor;
 
-    /** 年化收益率。 */
+    /** 年化收益率 */
     private BigDecimal annualizedReturn;
 
-    /** 夏普比率。 */
+    /** 夏普比率 */
     private BigDecimal sharpeRatio;
 
-    /** 索提诺比率。 */
+    /** 索提诺比率 */
     private BigDecimal sortinoRatio;
 
-    /** 开始时间。 */
+    /** 开始时间 */
     private LocalDateTime startTime;
 
-    /** 结束时间。 */
+    /** 结束时间 */
     private LocalDateTime endTime;
 
-    /** 创建时间。 */
+    /** 创建时间 */
     private LocalDateTime createTime;
 }

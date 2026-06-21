@@ -4,23 +4,22 @@ import com.quant.common.enums.Signal;
 import com.quant.common.model.TickData;
 import com.quant.strategy.Strategy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.LinkedList;
 
-/**
- * 双均线策略
- * 短周期均线上穿长周期均线 -> BUY
- * 短周期均线下穿长周期均线 -> SELL
- */
 @Slf4j
 @Component
 public class MovingAverageStrategy implements Strategy {
 
-    private static final int SHORT_PERIOD = 5;
-    private static final int LONG_PERIOD = 20;
+    @Value("${strategy.ma.short-period:5}")
+    private int shortPeriod;
+
+    @Value("${strategy.ma.long-period:20}")
+    private int longPeriod;
 
     private final LinkedList<BigDecimal> priceHistory = new LinkedList<>();
     private boolean running = false;
@@ -40,8 +39,10 @@ public class MovingAverageStrategy implements Strategy {
     @Override
     public void init() {
         priceHistory.clear();
+        prevShortMa = BigDecimal.ZERO;
+        prevLongMa = BigDecimal.ZERO;
         running = true;
-        log.info("策略初始化: {}", getStrategyName());
+        log.info("策略初始化: {}, shortPeriod={}, longPeriod={}", getStrategyName(), shortPeriod, longPeriod);
     }
 
     @Override
@@ -49,33 +50,27 @@ public class MovingAverageStrategy implements Strategy {
         if (!running) return Signal.HOLD;
 
         priceHistory.addLast(tick.getLastPrice());
-        if (priceHistory.size() > LONG_PERIOD) {
+        if (priceHistory.size() > longPeriod) {
             priceHistory.removeFirst();
         }
-
-        if (priceHistory.size() < LONG_PERIOD) {
+        if (priceHistory.size() < longPeriod) {
             return Signal.HOLD;
         }
 
-        BigDecimal shortMa = calcMA(SHORT_PERIOD);
-        BigDecimal longMa = calcMA(LONG_PERIOD);
+        BigDecimal shortMa = calcMA(shortPeriod);
+        BigDecimal longMa = calcMA(longPeriod);
 
         Signal signal = Signal.HOLD;
-
-        // 金叉：短均线上穿长均线
         if (prevShortMa.compareTo(prevLongMa) <= 0 && shortMa.compareTo(longMa) > 0) {
             signal = Signal.BUY;
             log.info("[{}] 金叉信号: shortMA={}, longMA={}, price={}", getStrategyId(), shortMa, longMa, tick.getLastPrice());
-        }
-        // 死叉：短均线下穿长均线
-        else if (prevShortMa.compareTo(prevLongMa) >= 0 && shortMa.compareTo(longMa) < 0) {
+        } else if (prevShortMa.compareTo(prevLongMa) >= 0 && shortMa.compareTo(longMa) < 0) {
             signal = Signal.SELL;
             log.info("[{}] 死叉信号: shortMA={}, longMA={}, price={}", getStrategyId(), shortMa, longMa, tick.getLastPrice());
         }
 
         prevShortMa = shortMa;
         prevLongMa = longMa;
-
         return signal;
     }
 

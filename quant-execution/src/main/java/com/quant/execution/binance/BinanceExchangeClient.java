@@ -2,20 +2,18 @@ package com.quant.execution.binance;
 
 import com.quant.common.model.Order;
 import com.quant.execution.ExchangeClient;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/**
- * Binance交易所客户端
- * 负责与Binance REST API交互执行交易
- */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class BinanceExchangeClient implements ExchangeClient {
 
-    private final OkHttpClient httpClient = new OkHttpClient();
+    private final OkHttpClient httpClient;
 
     @Value("${binance.api-key:}")
     private String apiKey;

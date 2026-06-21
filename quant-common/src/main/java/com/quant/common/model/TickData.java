@@ -22,14 +22,14 @@ import java.time.LocalDateTime;
 @TableName("tick_data")
 public class TickData {
 
-    /** 鏁版嵁ID */
+    /** 数据ID */
     @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 交易对 */
     private String symbol;
 
-    /** 鏁版嵁鍛ㄦ湡锛屽疄鏃禩ick榛樿TICK */
+    /** 数据周期 */
     private String interval;
 
     /** 最新价 */

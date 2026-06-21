@@ -5,7 +5,7 @@ import com.quant.common.model.Order;
 import com.quant.common.model.TickData;
 
 /**
- * 策略接口：定义完整生命周期钩子，对齐 banbot TradeStrat 回调矩阵
+ * 策略接口：定义完整生命周期钩子
  */
 public interface Strategy {
 
@@ -42,7 +42,7 @@ public interface Strategy {
 
     boolean isRunning();
 
-    /** 订单变更类型，对应 banbot OdChg* 常量 */
+    /** 订单变更类型 */
     enum OrderChangeType {
         NEW,          // 新建订单
         ENTER_FILL,   // 开仓成交

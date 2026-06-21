@@ -10,6 +10,7 @@ import com.quant.oms.mapper.TradeMapper;
 import com.quant.strategy.Strategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -33,22 +34,18 @@ public class OrderService {
     private final TradeMapper tradeMapper;
     private final List<Strategy> strategies;
 
-    /** 策略ID → 当前持仓订单数（P2-1：策略级持仓限额） */
+    @Value("${order.max-position-per-strategy:3}")
+    private int maxPositionPerStrategy;
+
+    /** 策略ID → 当前持仓订单数 */
     private final Map<String, AtomicInteger> strategyPositionCount = new ConcurrentHashMap<>();
 
-    /** 每个策略最大同时持仓订单数，可外置配置 */
-    private static final int MAX_POSITION_PER_STRATEGY = 3;
-
-    /**
-     * 根据信号下单，含策略级持仓限额检查。
-     */
     public Order placeOrder(Signal signal, String symbol, BigDecimal price, BigDecimal quantity, String strategyId) {
         if (signal == Signal.HOLD) return null;
 
-        // 策略级持仓限额
         AtomicInteger count = strategyPositionCount.computeIfAbsent(strategyId, k -> new AtomicInteger(0));
-        if (count.get() >= MAX_POSITION_PER_STRATEGY) {
-            log.warn("策略持仓已满: strategyId={}, current={}, max={}", strategyId, count.get(), MAX_POSITION_PER_STRATEGY);
+        if (count.get() >= maxPositionPerStrategy) {
+            log.warn("策略持仓已满: strategyId={}, current={}, max={}", strategyId, count.get(), maxPositionPerStrategy);
             return null;
         }
 
@@ -76,22 +73,16 @@ public class OrderService {
         return created;
     }
 
-    /**
-     * 成交回调：持久化成交记录，分发 ENTER_FILL 事件，更新策略持仓计数。
-     */
     public void onFill(String orderId, BigDecimal filledQty, BigDecimal avgPrice) {
         orderRepository.findById(orderId).ifPresent(order -> {
             order.setFilledQuantity(filledQty);
             order.setAvgFilledPrice(avgPrice);
             order.setUpdateTime(LocalDateTime.now());
-            if (filledQty.compareTo(order.getQuantity()) >= 0) {
-                order.setStatus(OrderStatus.FILLED);
-            } else {
-                order.setStatus(OrderStatus.PARTIALLY_FILLED);
-            }
+            order.setStatus(filledQty.compareTo(order.getQuantity()) >= 0
+                    ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED);
             orderRepository.save(order);
 
-            Trade trade = Trade.builder()
+            tradeMapper.insert(Trade.builder()
                     .tradeId(UUID.randomUUID().toString().replace("-", ""))
                     .orderId(orderId)
                     .symbol(order.getSymbol())
@@ -99,17 +90,13 @@ public class OrderService {
                     .price(avgPrice)
                     .quantity(filledQty)
                     .tradeTime(LocalDateTime.now())
-                    .build();
-            tradeMapper.insert(trade);
+                    .build());
 
             notifyOrderChange(order, order.getStrategyId(), Strategy.OrderChangeType.ENTER_FILL);
             log.info("订单成交更新: orderId={}, filledQty={}, avgPrice={}", orderId, filledQty, avgPrice);
         });
     }
 
-    /**
-     * 平仓成交回调：持久化并分发 EXIT_FILL 事件，释放策略持仓计数。
-     */
     public void onExitFill(String orderId, BigDecimal filledQty, BigDecimal avgPrice) {
         orderRepository.findById(orderId).ifPresent(order -> {
             order.setFilledQuantity(filledQty);

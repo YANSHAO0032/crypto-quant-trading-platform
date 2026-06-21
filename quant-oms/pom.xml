@@ -34,5 +34,9 @@
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.quant</groupId>
+            <artifactId>quant-strategy</artifactId>
+        </dependency>
     </dependencies>
 </project>
