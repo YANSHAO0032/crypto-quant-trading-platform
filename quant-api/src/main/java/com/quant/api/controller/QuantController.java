@@ -1,7 +1,7 @@
 package com.quant.api.controller;
 
 import com.quant.backtest.BacktestEngine;
-import com.quant.backtest.PerformanceAnalyzer;
+import com.quant.common.model.BacktestReport;
 import com.quant.common.model.Order;
 import com.quant.oms.OrderManager;
 import com.quant.strategy.Strategy;
@@ -67,7 +67,7 @@ public class QuantController {
     // ========== 回测接口 ==========
 
     @PostMapping("/backtest/{strategyId}")
-    public PerformanceAnalyzer.PerformanceReport runBacktest(
+    public BacktestReport runBacktest(
             @PathVariable String strategyId,
             @RequestParam(defaultValue = "BTCUSDT") String symbol,
             @RequestParam(defaultValue = "1000") int dataCount,

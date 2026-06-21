@@ -18,9 +18,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * 回测引擎。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -31,15 +28,8 @@ public class BacktestEngine {
     private final BacktestReportMapper backtestReportMapper;
     private final BacktestTradeRecordMapper backtestTradeRecordMapper;
 
-    /**
-     * 运行回测。
-     */
     @Transactional(rollbackFor = Exception.class)
-    public PerformanceAnalyzer.PerformanceReport runBacktest(
-            Strategy strategy,
-            List<TickData> historicalData,
-            BigDecimal initialCapital) {
-
+    public BacktestReport runBacktest(Strategy strategy, List<TickData> historicalData, BigDecimal initialCapital) {
         String backtestId = UUID.randomUUID().toString().replace("-", "");
         String symbol = historicalData.isEmpty() ? null : historicalData.get(0).getSymbol();
         LocalDateTime startTime = LocalDateTime.now();
@@ -49,14 +39,13 @@ public class BacktestEngine {
 
         strategy.init();
 
-        List<PerformanceAnalyzer.TradeRecord> tradeRecords = new ArrayList<>();
+        List<BacktestTradeRecord> tradeRecords = new ArrayList<>();
         int sequenceNo = 1;
 
         for (TickData tick : historicalData) {
             Signal signal = strategy.onTick(tick);
-
             if (signal != Signal.HOLD) {
-                tradeRecords.add(PerformanceAnalyzer.TradeRecord.builder()
+                tradeRecords.add(BacktestTradeRecord.builder()
                         .backtestId(backtestId)
                         .sequenceNo(sequenceNo++)
                         .signal(signal)
@@ -71,44 +60,29 @@ public class BacktestEngine {
         LocalDateTime endTime = LocalDateTime.now();
         log.info("回测完成: backtestId={}, 产生 {} 个交易信号", backtestId, tradeRecords.size());
 
-        PerformanceAnalyzer.PerformanceReport report = performanceAnalyzer.analyze(tradeRecords, initialCapital);
-        enrichReport(report, backtestId, strategy, symbol, historicalData.size(), startTime, endTime);
+        BacktestReport report = performanceAnalyzer.analyze(tradeRecords, initialCapital);
+        report.setBacktestId(backtestId);
+        report.setStrategyId(strategy.getStrategyId());
+        report.setStrategyName(strategy.getStrategyName());
+        report.setSymbol(symbol);
+        report.setDataCount(historicalData.size());
+        report.setStartTime(startTime);
+        report.setEndTime(endTime);
+
         persistReport(report);
         persistTradeRecords(tradeRecords);
         return report;
     }
 
-    /**
-     * 使用模拟数据快速回测。
-     */
     @Transactional(rollbackFor = Exception.class)
-    public PerformanceAnalyzer.PerformanceReport quickBacktest(
-            Strategy strategy, String symbol, int dataCount, BigDecimal startPrice, BigDecimal initialCapital) {
-
+    public BacktestReport quickBacktest(Strategy strategy, String symbol, int dataCount,
+                                        BigDecimal startPrice, BigDecimal initialCapital) {
         List<TickData> mockData = dataLoader.generateMockData(symbol, dataCount, startPrice);
         return runBacktest(strategy, mockData, initialCapital);
     }
 
-    private void enrichReport(
-            PerformanceAnalyzer.PerformanceReport report,
-            String backtestId,
-            Strategy strategy,
-            String symbol,
-            int dataCount,
-            LocalDateTime startTime,
-            LocalDateTime endTime) {
-
-        report.setBacktestId(backtestId);
-        report.setStrategyId(strategy.getStrategyId());
-        report.setStrategyName(strategy.getStrategyName());
-        report.setSymbol(symbol);
-        report.setDataCount(dataCount);
-        report.setStartTime(startTime);
-        report.setEndTime(endTime);
-    }
-
-    private void persistReport(PerformanceAnalyzer.PerformanceReport report) {
-        backtestReportMapper.insert(BacktestReport.builder()
+    private void persistReport(BacktestReport report) {
+        BacktestReport entity = BacktestReport.builder()
                 .backtestId(report.getBacktestId())
                 .strategyId(report.getStrategyId())
                 .strategyName(report.getStrategyName())
@@ -117,30 +91,25 @@ public class BacktestEngine {
                 .initialCapital(report.getInitialCapital())
                 .finalCapital(report.getFinalCapital())
                 .totalReturn(report.getTotalReturn())
+                .annualizedReturn(report.getAnnualizedReturn())
                 .totalTrades(report.getTotalTrades())
                 .winCount(report.getWinCount())
                 .lossCount(report.getLossCount())
                 .winRate(report.getWinRate())
                 .maxDrawdown(report.getMaxDrawdown())
                 .profitFactor(report.getProfitFactor())
-                .annualizedReturn(report.getAnnualizedReturn())
                 .sharpeRatio(report.getSharpeRatio())
                 .sortinoRatio(report.getSortinoRatio())
                 .startTime(report.getStartTime())
                 .endTime(report.getEndTime())
                 .createTime(LocalDateTime.now())
-                .build());
+                .build();
+        backtestReportMapper.insert(entity);
     }
 
-    private void persistTradeRecords(List<PerformanceAnalyzer.TradeRecord> tradeRecords) {
-        for (PerformanceAnalyzer.TradeRecord tradeRecord : tradeRecords) {
-            backtestTradeRecordMapper.insert(BacktestTradeRecord.builder()
-                    .backtestId(tradeRecord.getBacktestId())
-                    .sequenceNo(tradeRecord.getSequenceNo())
-                    .signal(tradeRecord.getSignal())
-                    .price(tradeRecord.getPrice())
-                    .timestamp(tradeRecord.getTimestamp())
-                    .build());
+    private void persistTradeRecords(List<BacktestTradeRecord> tradeRecords) {
+        for (BacktestTradeRecord record : tradeRecords) {
+            backtestTradeRecordMapper.insert(record);
         }
     }
 }

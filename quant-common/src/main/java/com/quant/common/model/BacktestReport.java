@@ -1,5 +1,6 @@
 package com.quant.common.model;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
@@ -9,6 +10,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 回测绩效报告模型。
@@ -80,4 +82,8 @@ public class BacktestReport {
 
     /** 创建时间 */
     private LocalDateTime createTime;
+
+    /** 每日统计（不入库，随接口响应返回） */
+    @TableField(exist = false)
+    private List<BacktestDailyStats> dailyStats;
 }

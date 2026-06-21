@@ -1,10 +1,9 @@
 package com.quant.backtest;
 
 import com.quant.common.enums.Signal;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.quant.common.model.BacktestDailyStats;
+import com.quant.common.model.BacktestReport;
+import com.quant.common.model.BacktestTradeRecord;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -19,7 +18,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 绩效分析器：计算 Sharpe/Sortino/年化收益/按日分组统计
+ * 绩效分析器：计算 Sharpe/Sortino/年化收益/按日分组统计。
+ * 直接使用 quant-common 中的模型，不在本类内部重复定义数据结构。
  */
 @Slf4j
 @Component
@@ -29,7 +29,7 @@ public class PerformanceAnalyzer {
     private static final int SCALE = 8;
     private static final RoundingMode RM = RoundingMode.HALF_UP;
 
-    public PerformanceReport analyze(List<TradeRecord> trades, BigDecimal initialCapital) {
+    public BacktestReport analyze(List<BacktestTradeRecord> trades, BigDecimal initialCapital) {
         if (trades.isEmpty()) {
             return emptyReport(initialCapital);
         }
@@ -45,7 +45,7 @@ public class PerformanceAnalyzer {
         BigDecimal entryPrice = BigDecimal.ZERO;
         boolean inPosition = false;
 
-        for (TradeRecord trade : trades) {
+        for (BacktestTradeRecord trade : trades) {
             if (trade.getSignal() == Signal.BUY && !inPosition) {
                 entryPrice = trade.getPrice();
                 inPosition = true;
@@ -61,13 +61,9 @@ public class PerformanceAnalyzer {
                     totalLoss = totalLoss.add(pnl.abs());
                 }
 
-                if (capital.compareTo(maxCapital) > 0) {
-                    maxCapital = capital;
-                }
+                if (capital.compareTo(maxCapital) > 0) maxCapital = capital;
                 BigDecimal drawdown = maxCapital.subtract(capital).divide(maxCapital, SCALE, RM);
-                if (drawdown.compareTo(maxDrawdown) > 0) {
-                    maxDrawdown = drawdown;
-                }
+                if (drawdown.compareTo(maxDrawdown) > 0) maxDrawdown = drawdown;
 
                 LocalDate date = Instant.ofEpochMilli(trade.getTimestamp())
                         .atZone(ZoneOffset.UTC).toLocalDate();
@@ -76,7 +72,6 @@ public class PerformanceAnalyzer {
             }
         }
 
-        // 日收益率序列（用于 Sharpe/Sortino）
         List<BigDecimal> dailyReturns = new ArrayList<>();
         BigDecimal runCapital = initialCapital;
         for (BigDecimal pnl : dailyPnl.values()) {
@@ -100,7 +95,7 @@ public class PerformanceAnalyzer {
                 ? totalReturn.multiply(TRADING_DAYS).divide(BigDecimal.valueOf(days), 4, RM)
                 : BigDecimal.ZERO;
 
-        PerformanceReport report = PerformanceReport.builder()
+        BacktestReport report = BacktestReport.builder()
                 .initialCapital(initialCapital)
                 .finalCapital(capital)
                 .totalReturn(totalReturn)
@@ -120,7 +115,6 @@ public class PerformanceAnalyzer {
         return report;
     }
 
-    /** 年化 Sharpe（无风险利率=0） */
     private BigDecimal calcSharpe(List<BigDecimal> returns) {
         if (returns.size() < 2) return BigDecimal.ZERO;
         BigDecimal mean = mean(returns);
@@ -130,7 +124,6 @@ public class PerformanceAnalyzer {
         return BigDecimal.valueOf(sharpe).setScale(4, RM);
     }
 
-    /** 年化 Sortino（只惩罚下行波动） */
     private BigDecimal calcSortino(List<BigDecimal> returns) {
         if (returns.size() < 2) return BigDecimal.ZERO;
         BigDecimal mean = mean(returns);
@@ -158,21 +151,22 @@ public class PerformanceAnalyzer {
                 .setScale(SCALE, RM);
     }
 
-    private List<DailyStats> buildDailyStats(Map<LocalDate, BigDecimal> dailyPnl, BigDecimal initCapital) {
-        List<DailyStats> result = new ArrayList<>();
+    private List<BacktestDailyStats> buildDailyStats(Map<LocalDate, BigDecimal> dailyPnl, BigDecimal initCapital) {
+        List<BacktestDailyStats> result = new ArrayList<>();
         BigDecimal running = initCapital;
         for (Map.Entry<LocalDate, BigDecimal> e : dailyPnl.entrySet()) {
             BigDecimal ret = running.compareTo(BigDecimal.ZERO) == 0
                     ? BigDecimal.ZERO
                     : e.getValue().divide(running, 4, RM);
-            result.add(DailyStats.builder().date(e.getKey()).pnl(e.getValue()).returnRate(ret).build());
+            result.add(BacktestDailyStats.builder()
+                    .date(e.getKey()).pnl(e.getValue()).returnRate(ret).build());
             running = running.add(e.getValue());
         }
         return result;
     }
 
-    private PerformanceReport emptyReport(BigDecimal initialCapital) {
-        return PerformanceReport.builder()
+    private BacktestReport emptyReport(BigDecimal initialCapital) {
+        return BacktestReport.builder()
                 .initialCapital(initialCapital).finalCapital(initialCapital)
                 .totalReturn(BigDecimal.ZERO).annualizedReturn(BigDecimal.ZERO)
                 .totalTrades(0).winCount(0).lossCount(0)
@@ -181,7 +175,7 @@ public class PerformanceAnalyzer {
                 .build();
     }
 
-    private void logReport(PerformanceReport r) {
+    private void logReport(BacktestReport r) {
         log.info("===== 回测绩效报告 =====");
         log.info("初始资金: {}  最终资金: {}", r.getInitialCapital(), r.getFinalCapital());
         log.info("总收益率: {}%  年化收益率: {}%",
@@ -193,45 +187,5 @@ public class PerformanceAnalyzer {
                 r.getMaxDrawdown().multiply(BigDecimal.valueOf(100)), r.getProfitFactor());
         log.info("Sharpe Ratio: {}  Sortino Ratio: {}", r.getSharpeRatio(), r.getSortinoRatio());
         log.info("========================");
-    }
-
-    @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class TradeRecord {
-        private String backtestId;
-        private int sequenceNo;
-        private Signal signal;
-        private BigDecimal price;
-        private long timestamp;
-    }
-
-    @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class DailyStats {
-        private LocalDate date;
-        private BigDecimal pnl;
-        private BigDecimal returnRate;
-    }
-
-    @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class PerformanceReport {
-        private String backtestId;
-        private String strategyId;
-        private String strategyName;
-        private String symbol;
-        private int dataCount;
-        private BigDecimal initialCapital;
-        private BigDecimal finalCapital;
-        private BigDecimal totalReturn;
-        private BigDecimal annualizedReturn;
-        private int totalTrades;
-        private int winCount;
-        private int lossCount;
-        private BigDecimal winRate;
-        private BigDecimal maxDrawdown;
-        private BigDecimal profitFactor;
-        private BigDecimal sharpeRatio;
-        private BigDecimal sortinoRatio;
-        private List<DailyStats> dailyStats;
-        private java.time.LocalDateTime startTime;
-        private java.time.LocalDateTime endTime;
     }
 }
