@@ -1,3 +1,36 @@
+-- K线数据表（按 symbol 分表，以 BTCUSDT / ETHUSDT 为例）
+-- Binance 公开数据 CSV 格式: open_time,open,high,low,close,volume,close_time,quote_volume,trade_count,...
+-- 主键 (open_time, interval) 保证幂等写入，LOAD DATA INFILE 可直接导入
+CREATE TABLE IF NOT EXISTS kline_btcusdt (
+    open_time     BIGINT        NOT NULL COMMENT 'K线开盘时间戳(ms)',
+    `interval`    VARCHAR(8)    NOT NULL COMMENT '周期: 1m/5m/1h/4h/1d',
+    open_price    DECIMAL(20,8) NOT NULL COMMENT '开盘价',
+    high_price    DECIMAL(20,8) NOT NULL COMMENT '最高价',
+    low_price     DECIMAL(20,8) NOT NULL COMMENT '最低价',
+    close_price   DECIMAL(20,8) NOT NULL COMMENT '收盘价',
+    volume        DECIMAL(30,8) NOT NULL COMMENT '成交量(BTC)',
+    close_time    BIGINT        NOT NULL COMMENT 'K线收盘时间戳(ms)',
+    quote_volume  DECIMAL(30,8) NOT NULL COMMENT '成交额(USDT)',
+    trade_count   INT           NOT NULL COMMENT '成交笔数',
+    PRIMARY KEY (open_time, `interval`),
+    KEY idx_btc_interval_time (`interval`, open_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='BTCUSDT K线数据';
+
+CREATE TABLE IF NOT EXISTS kline_ethusdt (
+    open_time     BIGINT        NOT NULL COMMENT 'K线开盘时间戳(ms)',
+    `interval`    VARCHAR(8)    NOT NULL COMMENT '周期: 1m/5m/1h/4h/1d',
+    open_price    DECIMAL(20,8) NOT NULL COMMENT '开盘价',
+    high_price    DECIMAL(20,8) NOT NULL COMMENT '最高价',
+    low_price     DECIMAL(20,8) NOT NULL COMMENT '最低价',
+    close_price   DECIMAL(20,8) NOT NULL COMMENT '收盘价',
+    volume        DECIMAL(30,8) NOT NULL COMMENT '成交量(ETH)',
+    close_time    BIGINT        NOT NULL COMMENT 'K线收盘时间戳(ms)',
+    quote_volume  DECIMAL(30,8) NOT NULL COMMENT '成交额(USDT)',
+    trade_count   INT           NOT NULL COMMENT '成交笔数',
+    PRIMARY KEY (open_time, `interval`),
+    KEY idx_eth_interval_time (`interval`, open_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ETHUSDT K线数据';
+
 CREATE TABLE IF NOT EXISTS kline_range (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
     symbol VARCHAR(32) NOT NULL COMMENT '交易对',
@@ -108,6 +141,9 @@ CREATE TABLE IF NOT EXISTS backtest_report (
     strategy_id VARCHAR(128) NULL COMMENT '策略ID',
     strategy_name VARCHAR(128) NULL COMMENT '策略名称',
     symbol VARCHAR(32) NULL COMMENT '交易对',
+    `interval` VARCHAR(8) NULL COMMENT 'K线周期',
+    range_start_ms BIGINT NULL COMMENT '回测数据起始时间戳(ms)',
+    range_end_ms BIGINT NULL COMMENT '回测数据结束时间戳(ms)',
     data_count INT NULL COMMENT '数据条数',
     initial_capital DECIMAL(36,18) NULL COMMENT '初始资金',
     final_capital DECIMAL(36,18) NULL COMMENT '最终资金',

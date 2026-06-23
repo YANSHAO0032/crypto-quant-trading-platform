@@ -1,7 +1,10 @@
 package com.quant.backtest;
 
+import com.quant.common.context.KlineContext;
+import com.quant.common.model.Kline;
 import com.quant.common.model.TickData;
 import com.quant.market.MarketDataService;
+import com.quant.market.mapper.KlineMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -11,11 +14,12 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
  * 历史数据加载器。
- * 支持三种数据源：CSV 文件、数据库（MarketDataService）、模拟数据。
+ * 支持四种数据源：K线分表(主路径)、CSV 文件、tick_data 表(旧)、模拟数据(fallback)。
  */
 @Slf4j
 @Component
@@ -23,13 +27,45 @@ import java.util.List;
 public class DataLoader {
 
     private final MarketDataService marketDataService;
+    private final KlineMapper klineMapper;
 
     /**
-     * 从数据库加载历史 K 线数据（优先使用真实数据）。
+     * 从 kline_{symbol} 分表加载指定时间范围的 K 线（主路径）。
+     */
+    public List<Kline> loadKlines(String symbol, String interval, long startMs, long endMs) {
+        KlineContext.set(symbol);
+        try {
+            List<Kline> data = klineMapper.selectByRange(interval, startMs, endMs);
+            log.info("加载K线: symbol={}, interval={}, range=[{},{}], 条数={}",
+                    symbol, interval, startMs, endMs, data.size());
+            return data;
+        } finally {
+            KlineContext.clear();
+        }
+    }
+
+    /**
+     * 从 kline_{symbol} 分表加载最新 N 根 K 线。
+     */
+    public List<Kline> loadLatestKlines(String symbol, String interval, int limit) {
+        KlineContext.set(symbol);
+        try {
+            List<Kline> data = klineMapper.selectLatest(interval, limit);
+            Collections.reverse(data);
+            log.info("加载最新K线: symbol={}, interval={}, limit={}, 实际条数={}",
+                    symbol, interval, limit, data.size());
+            return data;
+        } finally {
+            KlineContext.clear();
+        }
+    }
+
+    /**
+     * 从旧 tick_data 表加载历史 K 线数据（兼容旧数据，新数据请用 loadKlines）。
      */
     public List<TickData> loadFromDb(String symbol, String interval, int limit) {
         List<TickData> data = marketDataService.getHistoricalKlines(symbol, interval, limit);
-        log.info("从数据库加载历史K线: symbol={}, interval={}, 实际条数={}", symbol, interval, data.size());
+        log.info("从tick_data加载历史K线: symbol={}, interval={}, 实际条数={}", symbol, interval, data.size());
         return data;
     }
 

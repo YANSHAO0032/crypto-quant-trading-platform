@@ -153,6 +153,44 @@ public class QuantController {
 
     // ========== 回测接口 ==========
 
+    /**
+     * 基于 kline_{symbol} 分表的标准回测（推荐）。
+     * startMs/endMs 传 Unix 毫秒时间戳，如 1672502400000 = 2023-01-01 00:00:00 UTC
+     */
+    @PostMapping("/backtest/{strategyId}/kline")
+    public ResponseEntity<BacktestReport> runKlineBacktest(
+            @PathVariable String strategyId,
+            @RequestParam(defaultValue = "BTCUSDT") String symbol,
+            @RequestParam(defaultValue = "1m") String interval,
+            @RequestParam long startMs,
+            @RequestParam long endMs,
+            @RequestParam(defaultValue = "100000") BigDecimal capital) {
+
+        Strategy strategy = strategyRunner.findById(strategyId).orElse(null);
+        if (strategy == null) return ResponseEntity.notFound().build();
+        if (strategyRunner.isRunning(strategyId)) return ResponseEntity.badRequest().build();
+        return ResponseEntity.ok(
+                backtestEngine.runKlineBacktest(strategy, symbol, interval, startMs, endMs, capital));
+    }
+
+    /**
+     * 基于 kline_{symbol} 分表的快速回测（取最新 N 根，无需指定时间范围）。
+     */
+    @PostMapping("/backtest/{strategyId}/kline/latest")
+    public ResponseEntity<BacktestReport> runLatestKlineBacktest(
+            @PathVariable String strategyId,
+            @RequestParam(defaultValue = "BTCUSDT") String symbol,
+            @RequestParam(defaultValue = "1m") String interval,
+            @RequestParam(defaultValue = "500") int limit,
+            @RequestParam(defaultValue = "100000") BigDecimal capital) {
+
+        Strategy strategy = strategyRunner.findById(strategyId).orElse(null);
+        if (strategy == null) return ResponseEntity.notFound().build();
+        if (strategyRunner.isRunning(strategyId)) return ResponseEntity.badRequest().build();
+        return ResponseEntity.ok(
+                backtestEngine.quickKlineBacktest(strategy, symbol, interval, limit, capital));
+    }
+
     @PostMapping("/backtest/{strategyId}")
     public ResponseEntity<BacktestReport> runBacktest(
             @PathVariable String strategyId,

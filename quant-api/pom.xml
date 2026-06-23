@@ -24,6 +24,10 @@
         </dependency>
         <dependency>
             <groupId>com.quant</groupId>
+            <artifactId>quant-market</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.quant</groupId>
             <artifactId>quant-strategy</artifactId>
         </dependency>
         <dependency>

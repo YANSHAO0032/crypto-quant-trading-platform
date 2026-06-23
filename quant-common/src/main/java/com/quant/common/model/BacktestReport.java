@@ -35,6 +35,15 @@ public class BacktestReport {
     /** 交易对 */
     private String symbol;
 
+    /** K线周期，如 1m/5m/1h/4h/1d */
+    private String interval;
+
+    /** 回测数据起始时间戳(ms) */
+    private Long rangeStartMs;
+
+    /** 回测数据结束时间戳(ms) */
+    private Long rangeEndMs;
+
     /** 数据条数 */
     private Integer dataCount;
 
