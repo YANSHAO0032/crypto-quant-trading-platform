@@ -1,7 +1,7 @@
 package com.quant.market.kline;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -13,7 +13,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -21,23 +27,27 @@ import java.util.zip.ZipFile;
  * K线历史数据批量导入服务。
  * 支持 Binance 公开数据格式（无表头 CSV / ZIP）：
  *   open_time, open, high, low, close, volume, close_time, quote_volume, trade_count, ...
+ *
+ * 同一月份 CSV 和 ZIP 同时存在时优先取 ZIP，避免重复导入。
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class KlineImportService {
 
     private static final int BATCH_SIZE = 2000;
 
     private final JdbcTemplate jdbcTemplate;
+    private final ThreadPoolExecutor executor;
+
+    public KlineImportService(JdbcTemplate jdbcTemplate,
+                              @Qualifier("klineImportExecutor") ThreadPoolExecutor executor) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.executor = executor;
+    }
 
     /**
-     * 批量导入指定目录下的所有 CSV/ZIP 文件。
-     *
-     * @param dataDir  文件目录，如 D:\java_workspace\btcdata
-     * @param symbol   交易对，如 BTCUSDT（决定写入哪张分表）
-     * @param interval K线周期，如 1m
-     * @return 导入结果
+     * 按月份多线程导入指定目录下的所有 K 线文件。
+     * 同名 CSV/ZIP 只取 ZIP；各月份文件并发执行，互不干扰。
      */
     public ImportResult importDir(String dataDir, String symbol, String interval) {
         String table = "kline_" + symbol.toLowerCase();
@@ -48,25 +58,66 @@ public class KlineImportService {
             return ImportResult.of(0, 0, "目录下无 CSV/ZIP 文件: " + dataDir);
         }
 
-        log.info("开始导入K线数据: symbol={}, interval={}, 文件数={}, 目录={}", symbol, interval, files.size(), dataDir);
+        log.info("开始多线程导入K线: symbol={}, interval={}, 文件数={}, 线程数={}, 目录={}",
+                symbol, interval, files.size(), executor.getCorePoolSize(), dataDir);
 
-        long totalRows = 0;
-        int fileCount = 0;
+        AtomicLong totalRows = new AtomicLong(0);
+        AtomicInteger totalFiles = new AtomicInteger(0);
+        int total = files.size();
+
+        List<CompletableFuture<Void>> futures = new ArrayList<>(files.size());
 
         for (Path file : files) {
-            try {
-                long rows = importFile(file, sql, interval);
-                totalRows += rows;
-                fileCount++;
-                log.info("  [{}/{}] {} -> +{} 行", fileCount, files.size(), file.getFileName(), rows);
-            } catch (Exception e) {
-                log.error("  导入失败: {}", file.getFileName(), e);
+            CompletableFuture<Void> f = CompletableFuture.runAsync(() -> {
+                try {
+                    long rows = importFile(file, sql, interval);
+                    int done = totalFiles.incrementAndGet();
+                    totalRows.addAndGet(rows);
+                    log.info("  [{}/{}] {} -> +{} 行  (线程:{})",
+                            done, total, file.getFileName(), rows, Thread.currentThread().getName());
+                } catch (Exception e) {
+                    log.error("  导入失败: {}", file.getFileName(), e);
+                }
+            }, executor);
+            futures.add(f);
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        String msg = String.format("完成: %d 个文件，共导入 %d 行 -> %s",
+                totalFiles.get(), totalRows.get(), table);
+        log.info(msg);
+        return ImportResult.of(totalFiles.get(), totalRows.get(), msg);
+    }
+
+    /**
+     * 去重：同月 CSV + ZIP 只保留 ZIP（优先），按文件名排序后并发执行。
+     * 文件名规律: BTCUSDT-1m-2020-01.csv / .zip
+     */
+    private List<Path> collectFiles(String dataDir) {
+        File dir = new File(dataDir);
+        if (!dir.isDirectory()) return List.of();
+
+        File[] all = dir.listFiles(f ->
+                f.isFile() && (f.getName().endsWith(".csv") || f.getName().endsWith(".zip")));
+        if (all == null) return List.of();
+
+        // key = 去掉后缀的文件名（即月份标识），value = 优先 ZIP
+        Map<String, Path> deduped = new LinkedHashMap<>();
+        for (File f : all) {
+            String name = f.getName();
+            String key = name.endsWith(".zip")
+                    ? name.substring(0, name.length() - 4)
+                    : name.substring(0, name.length() - 4);
+            Path existing = deduped.get(key);
+            if (existing == null || name.endsWith(".zip")) {
+                deduped.put(key, Paths.get(f.getAbsolutePath()));
             }
         }
 
-        String msg = String.format("完成: %d 个文件，共导入 %d 行 -> %s", fileCount, totalRows, table);
-        log.info(msg);
-        return ImportResult.of(fileCount, totalRows, msg);
+        List<Path> result = new ArrayList<>(deduped.values());
+        result.sort(null);
+        return result;
     }
 
     private long importFile(Path file, String sql, String interval) throws IOException {
@@ -103,16 +154,16 @@ public class KlineImportService {
             if (cols.length < 9) continue;
 
             batch.add(new Object[]{
-                    Long.parseLong(cols[0].trim()),    // open_time
-                    interval,                           // interval
-                    cols[1].trim(),                    // open_price
-                    cols[2].trim(),                    // high_price
-                    cols[3].trim(),                    // low_price
-                    cols[4].trim(),                    // close_price
-                    cols[5].trim(),                    // volume
-                    Long.parseLong(cols[6].trim()),    // close_time
-                    cols[7].trim(),                    // quote_volume
-                    Integer.parseInt(cols[8].trim()),  // trade_count
+                    Long.parseLong(cols[0].trim()),
+                    interval,
+                    cols[1].trim(),
+                    cols[2].trim(),
+                    cols[3].trim(),
+                    cols[4].trim(),
+                    cols[5].trim(),
+                    Long.parseLong(cols[6].trim()),
+                    cols[7].trim(),
+                    Integer.parseInt(cols[8].trim()),
             });
 
             if (batch.size() >= BATCH_SIZE) {
@@ -128,22 +179,6 @@ public class KlineImportService {
         }
 
         return total;
-    }
-
-    private List<Path> collectFiles(String dataDir) {
-        File dir = new File(dataDir);
-        if (!dir.isDirectory()) return List.of();
-
-        List<Path> result = new ArrayList<>();
-        File[] files = dir.listFiles(f ->
-                f.isFile() && (f.getName().endsWith(".csv") || f.getName().endsWith(".zip")));
-        if (files != null) {
-            for (File f : files) {
-                result.add(Paths.get(f.getAbsolutePath()));
-            }
-            result.sort(null);
-        }
-        return result;
     }
 
     private String buildInsertSql(String table) {
