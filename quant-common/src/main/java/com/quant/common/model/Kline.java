@@ -1,5 +1,6 @@
 package com.quant.common.model;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
@@ -20,8 +21,8 @@ import java.math.BigDecimal;
 @TableName("kline_btcusdt")
 public class Kline {
 
-    /** K线开盘时间戳(ms)，联合主键之一 */
-    @TableId
+    /** K线开盘时间戳(ms)，联合主键之一，用 @TableField 避免 MyBatis-Plus 误当单主键处理 */
+    @TableField("open_time")
     private Long openTime;
 
     /** K线周期，如 1m/5m/1h/4h/1d */

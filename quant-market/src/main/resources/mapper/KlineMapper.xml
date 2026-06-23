@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.quant.market.mapper.KlineMapper">
+
+    <select id="selectByRange" resultType="com.quant.common.model.Kline">
+        SELECT open_time, `interval`, open_price, high_price, low_price, close_price,
+               volume, close_time, quote_volume, trade_count
+        FROM kline_btcusdt
+        WHERE `interval` = #{interval}
+          AND open_time &gt;= #{startMs}
+          AND open_time &lt;= #{endMs}
+        ORDER BY open_time ASC
+    </select>
+
+    <select id="selectLatest" resultType="com.quant.common.model.Kline">
+        SELECT open_time, `interval`, open_price, high_price, low_price, close_price,
+               volume, close_time, quote_volume, trade_count
+        FROM kline_btcusdt
+        WHERE `interval` = #{interval}
+        ORDER BY open_time DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

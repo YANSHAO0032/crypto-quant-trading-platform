@@ -36,6 +36,7 @@ public class BacktestReport {
     private String symbol;
 
     /** K线周期，如 1m/5m/1h/4h/1d */
+    @TableField("`interval`")
     private String interval;
 
     /** 回测数据起始时间戳(ms) */

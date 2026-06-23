@@ -33,6 +33,7 @@ public class BacktestTradeRecord {
     private Integer sequenceNo;
 
     /** 交易信号 */
+    @TableField("`signal`")
     private Signal signal;
 
     /** 信号价格 */
