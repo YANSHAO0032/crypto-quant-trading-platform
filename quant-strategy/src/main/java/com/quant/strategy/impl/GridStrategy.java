@@ -20,10 +20,10 @@ import java.util.List;
 @Component
 public class GridStrategy implements Strategy {
 
-    @Value("${strategy.grid.upper-price:70000}")
+    @Value("${strategy.grid.upper-price:85000}")
     private BigDecimal upperPrice;
 
-    @Value("${strategy.grid.lower-price:60000}")
+    @Value("${strategy.grid.lower-price:70000}")
     private BigDecimal lowerPrice;
 
     @Value("${strategy.grid.grid-count:10}")

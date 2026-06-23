@@ -8,8 +8,8 @@
                volume, close_time, quote_volume, trade_count
         FROM kline_btcusdt
         WHERE `interval` = #{interval}
-          AND open_time &gt;= #{startMs}
-          AND open_time &lt;= #{endMs}
+          AND open_time &gt;= #{startMs} * 1000
+          AND open_time &lt;= #{endMs} * 1000
         ORDER BY open_time ASC
     </select>
 

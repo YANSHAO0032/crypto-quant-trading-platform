@@ -36,6 +36,10 @@ public class DataLoader {
         KlineContext.set(symbol);
         try {
             List<Kline> data = klineMapper.selectByRange(interval, startMs, endMs);
+            data.forEach(s -> {
+                s.setOpenTime(s.getOpenTime() / 1000);
+                s.setCloseTime(s.getCloseTime() / 1000);
+            });
             log.info("加载K线: symbol={}, interval={}, range=[{},{}], 条数={}",
                     symbol, interval, startMs, endMs, data.size());
             return data;
@@ -51,6 +55,10 @@ public class DataLoader {
         KlineContext.set(symbol);
         try {
             List<Kline> data = klineMapper.selectLatest(interval, limit);
+            data.forEach(s -> {
+                s.setOpenTime(s.getOpenTime() / 1000);
+                s.setCloseTime(s.getCloseTime() / 1000);
+            });
             Collections.reverse(data);
             log.info("加载最新K线: symbol={}, interval={}, limit={}, 实际条数={}",
                     symbol, interval, limit, data.size());
