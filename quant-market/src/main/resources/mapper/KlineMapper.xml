@@ -8,9 +8,17 @@
                volume, close_time, quote_volume, trade_count
         FROM kline_btcusdt
         WHERE `interval` = #{interval}
-          AND open_time &gt;= #{startMs} * 1000
-          AND open_time &lt;= #{endMs} * 1000
-        ORDER BY open_time ASC
+          AND (
+            open_time BETWEEN #{startMs} AND #{endMs}
+            OR open_time BETWEEN #{startMs} * 1000 AND #{endMs} * 1000
+            OR open_time BETWEEN #{startMs} * 1000000 AND #{endMs} * 1000000
+          )
+        ORDER BY
+          CASE
+            WHEN open_time &gt;= 1000000000000000000 THEN open_time DIV 1000000
+            WHEN open_time &gt;= 1000000000000000 THEN open_time DIV 1000
+            ELSE open_time
+          END ASC
     </select>
 
     <select id="selectLatest" resultType="com.quant.common.model.Kline">
@@ -18,7 +26,12 @@
                volume, close_time, quote_volume, trade_count
         FROM kline_btcusdt
         WHERE `interval` = #{interval}
-        ORDER BY open_time DESC
+        ORDER BY
+          CASE
+            WHEN open_time &gt;= 1000000000000000000 THEN open_time DIV 1000000
+            WHEN open_time &gt;= 1000000000000000 THEN open_time DIV 1000
+            ELSE open_time
+          END DESC
         LIMIT #{limit}
     </select>
 

@@ -14,8 +14,10 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * 历史数据加载器。
@@ -35,11 +37,7 @@ public class DataLoader {
     public List<Kline> loadKlines(String symbol, String interval, long startMs, long endMs) {
         KlineContext.set(symbol);
         try {
-            List<Kline> data = klineMapper.selectByRange(interval, startMs, endMs);
-            data.forEach(s -> {
-                s.setOpenTime(s.getOpenTime() / 1000);
-                s.setCloseTime(s.getCloseTime() / 1000);
-            });
+            List<Kline> data = normalizeSortAndDedupe(klineMapper.selectByRange(interval, startMs, endMs));
             log.info("加载K线: symbol={}, interval={}, range=[{},{}], 条数={}",
                     symbol, interval, startMs, endMs, data.size());
             return data;
@@ -54,12 +52,7 @@ public class DataLoader {
     public List<Kline> loadLatestKlines(String symbol, String interval, int limit) {
         KlineContext.set(symbol);
         try {
-            List<Kline> data = klineMapper.selectLatest(interval, limit);
-            data.forEach(s -> {
-                s.setOpenTime(s.getOpenTime() / 1000);
-                s.setCloseTime(s.getCloseTime() / 1000);
-            });
-            Collections.reverse(data);
+            List<Kline> data = normalizeSortAndDedupe(klineMapper.selectLatest(interval, limit));
             log.info("加载最新K线: symbol={}, interval={}, limit={}, 实际条数={}",
                     symbol, interval, limit, data.size());
             return data;
@@ -117,6 +110,18 @@ public class DataLoader {
         }
 
         return dataList;
+    }
+
+    private List<Kline> normalizeSortAndDedupe(List<Kline> data) {
+        Map<Long, Kline> byOpenTime = new TreeMap<>();
+        for (Kline kline : data) {
+            kline.setOpenTime(MarketTimeNormalizer.toEpochMillis(kline.getOpenTime()));
+            kline.setCloseTime(MarketTimeNormalizer.toEpochMillis(kline.getCloseTime()));
+            byOpenTime.putIfAbsent(kline.getOpenTime(), kline);
+        }
+        return byOpenTime.values().stream()
+                .sorted(Comparator.comparing(Kline::getOpenTime))
+                .toList();
     }
 
     /**

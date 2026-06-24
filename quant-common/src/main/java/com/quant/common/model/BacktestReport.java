@@ -46,8 +46,44 @@ public class BacktestReport {
     /** 回测数据结束时间戳(ms) */
     private Long rangeEndMs;
 
+    /** 用户请求的起始时间戳(ms) */
+    private Long requestedStartMs;
+
+    /** 用户请求的结束时间戳(ms) */
+    private Long requestedEndMs;
+
+    /** 实际数据是否完整覆盖请求区间 */
+    private Boolean coverageComplete;
+
+    /** 缺失的K线数量 */
+    private Long missingBars;
+
+    /** 数据覆盖说明 */
+    private String coverageMessage;
+
     /** 数据条数 */
     private Integer dataCount;
+
+    /** 仓位计算模式 */
+    private String sizingMode;
+
+    /** 固定下单数量 */
+    private BigDecimal orderQuantity;
+
+    /** 固定名义下单金额 */
+    private BigDecimal orderNotional;
+
+    /** 按权益百分比下单 */
+    private BigDecimal equityPercent;
+
+    /** 手续费率 */
+    private BigDecimal feeRate;
+
+    /** 总手续费 */
+    private BigDecimal totalFee;
+
+    /** 被拒绝的订单数量 */
+    private Integer rejectedOrders;
 
     /** 初始资金 */
     private BigDecimal initialCapital;

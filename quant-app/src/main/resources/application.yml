@@ -62,3 +62,6 @@ strategy:
     period: 14
     oversold: 30
     overbought: 70
+
+backtest:
+  fee-rate: 0.001

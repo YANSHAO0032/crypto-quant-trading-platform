@@ -1,7 +1,14 @@
 package com.quant.api.controller;
 
+import com.quant.api.request.CreateOrderRequest;
+import com.quant.api.request.KlineBacktestRequest;
+import com.quant.api.request.LatestKlineBacktestRequest;
+import com.quant.api.request.QuickBacktestRequest;
+import com.quant.api.request.StartStrategyRequest;
 import com.quant.api.vo.StrategyVO;
+import com.quant.backtest.BacktestConfig;
 import com.quant.backtest.BacktestEngine;
+import com.quant.backtest.PositionSizingMode;
 import com.quant.common.model.BacktestReport;
 import com.quant.common.model.Order;
 import com.quant.oms.IOrderManager;
@@ -45,8 +52,15 @@ public class QuantController {
     }
 
     @PostMapping("/orders")
-    public Order createOrder(@RequestBody Order order) {
-        return orderManager.createOrder(order);
+    public Order createOrder(@RequestBody CreateOrderRequest request) {
+        return orderManager.createOrder(Order.builder()
+                .symbol(request.getSymbol())
+                .side(request.getSide())
+                .type(request.getType())
+                .price(request.getPrice())
+                .quantity(request.getQuantity())
+                .strategyId(request.getStrategyId())
+                .build());
     }
 
     @PostMapping("/orders/{orderId}/submit")
@@ -79,7 +93,7 @@ public class QuantController {
     @PostMapping("/strategies/{strategyId}/start")
     public ResponseEntity<Map<String, Object>> startStrategy(
             @PathVariable String strategyId,
-            @RequestParam String symbol) {
+            @RequestBody StartStrategyRequest request) {
 
         if (strategyRunner.findById(strategyId).isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -87,8 +101,8 @@ public class QuantController {
         if (strategyRunner.isRunning(strategyId)) {
             return ResponseEntity.ok(Map.of("success", false, "message", "策略已在运行中"));
         }
-        strategyRunner.start(strategyId, symbol);
-        return ResponseEntity.ok(Map.of("success", true, "strategyId", strategyId, "symbol", symbol));
+        strategyRunner.start(strategyId, request.getSymbol());
+        return ResponseEntity.ok(Map.of("success", true, "strategyId", strategyId, "symbol", request.getSymbol()));
     }
 
     @PostMapping("/strategies/{strategyId}/stop")
@@ -160,17 +174,15 @@ public class QuantController {
     @PostMapping("/backtest/{strategyId}/kline")
     public ResponseEntity<BacktestReport> runKlineBacktest(
             @PathVariable String strategyId,
-            @RequestParam(defaultValue = "BTCUSDT") String symbol,
-            @RequestParam(defaultValue = "1m") String interval,
-            @RequestParam long startMs,
-            @RequestParam long endMs,
-            @RequestParam(defaultValue = "100000") BigDecimal capital) {
+            @RequestBody KlineBacktestRequest request) {
 
         Strategy strategy = strategyRunner.findById(strategyId).orElse(null);
         if (strategy == null) return ResponseEntity.notFound().build();
         if (strategyRunner.isRunning(strategyId)) return ResponseEntity.badRequest().build();
+        if (request.getStartMs() == null || request.getEndMs() == null) return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(
-                backtestEngine.runKlineBacktest(strategy, symbol, interval, startMs, endMs, capital));
+                backtestEngine.runKlineBacktest(strategy, request.getSymbol(), request.getInterval(),
+                        request.getStartMs(), request.getEndMs(), request.getCapital(), toBacktestConfig(request)));
     }
 
     /**
@@ -179,25 +191,20 @@ public class QuantController {
     @PostMapping("/backtest/{strategyId}/kline/latest")
     public ResponseEntity<BacktestReport> runLatestKlineBacktest(
             @PathVariable String strategyId,
-            @RequestParam(defaultValue = "BTCUSDT") String symbol,
-            @RequestParam(defaultValue = "1m") String interval,
-            @RequestParam(defaultValue = "500") int limit,
-            @RequestParam(defaultValue = "100000") BigDecimal capital) {
+            @RequestBody LatestKlineBacktestRequest request) {
 
         Strategy strategy = strategyRunner.findById(strategyId).orElse(null);
         if (strategy == null) return ResponseEntity.notFound().build();
         if (strategyRunner.isRunning(strategyId)) return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(
-                backtestEngine.quickKlineBacktest(strategy, symbol, interval, limit, capital));
+                backtestEngine.quickKlineBacktest(strategy, request.getSymbol(), request.getInterval(),
+                        request.getLimit(), request.getCapital()));
     }
 
     @PostMapping("/backtest/{strategyId}")
     public ResponseEntity<BacktestReport> runBacktest(
             @PathVariable String strategyId,
-            @RequestParam(defaultValue = "BTCUSDT") String symbol,
-            @RequestParam(defaultValue = "1000") int dataCount,
-            @RequestParam(defaultValue = "65000") BigDecimal startPrice,
-            @RequestParam(defaultValue = "100000") BigDecimal capital) {
+            @RequestBody QuickBacktestRequest request) {
 
         Strategy strategy = strategyRunner.findById(strategyId).orElse(null);
         if (strategy == null) {
@@ -206,7 +213,8 @@ public class QuantController {
         if (strategyRunner.isRunning(strategyId)) {
             return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.ok(backtestEngine.quickBacktest(strategy, symbol, dataCount, startPrice, capital));
+        return ResponseEntity.ok(backtestEngine.quickBacktest(strategy, request.getSymbol(),
+                request.getDataCount(), request.getStartPrice(), request.getCapital()));
     }
 
     @GetMapping("/backtest")
@@ -214,5 +222,19 @@ public class QuantController {
             @RequestParam(required = false) String strategyId,
             @RequestParam(defaultValue = "20") int limit) {
         return backtestEngine.listReports(strategyId, limit);
+    }
+
+    private BacktestConfig toBacktestConfig(KlineBacktestRequest request) {
+        PositionSizingMode sizingMode = request.getSizingMode() == null || request.getSizingMode().isBlank()
+                ? PositionSizingMode.FIXED_QTY
+                : PositionSizingMode.valueOf(request.getSizingMode().trim().toUpperCase());
+        return BacktestConfig.builder()
+                .sizingMode(sizingMode)
+                .orderQuantity(request.getOrderQuantity())
+                .orderNotional(request.getOrderNotional())
+                .equityPercent(request.getEquityPercent())
+                .allowPartialData(Boolean.TRUE.equals(request.getAllowPartialData()))
+                .timezone(request.getTimezone())
+                .build();
     }
 }

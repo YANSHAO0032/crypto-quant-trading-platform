@@ -11,8 +11,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,76 +29,60 @@ public class PerformanceAnalyzer {
     private static final BigDecimal TRADING_DAYS = new BigDecimal("365");
     private static final int SCALE = 8;
     private static final RoundingMode RM = RoundingMode.HALF_UP;
+    private static final String DEFAULT_TIMEZONE = "Asia/Shanghai";
 
-    public BacktestReport analyze(List<BacktestTradeRecord> trades, BigDecimal initialCapital) {
-        if (trades.isEmpty()) {
-            return emptyReport(initialCapital);
+    public BacktestReport analyze(BacktestRunResult result) {
+        return analyze(result, DEFAULT_TIMEZONE);
+    }
+
+    public BacktestReport analyze(BacktestRunResult result, String timezone) {
+        if (result.getEquityCurve() == null || result.getEquityCurve().isEmpty()) {
+            return emptyReport(result.getInitialCapital());
         }
 
-        Map<LocalDate, BigDecimal> dailyPnl = new LinkedHashMap<>();
-        BigDecimal capital = initialCapital;
-        BigDecimal maxCapital = initialCapital;
-        BigDecimal maxDrawdown = BigDecimal.ZERO;
+        ZoneId zoneId = ZoneId.of(timezone == null || timezone.isBlank() ? DEFAULT_TIMEZONE : timezone);
+        List<EquityPoint> curve = result.getEquityCurve().stream()
+                .sorted(Comparator.comparing(EquityPoint::getTimestampMs))
+                .toList();
+        BigDecimal initialCapital = scale(result.getInitialCapital());
+        BigDecimal finalCapital = scale(curve.get(curve.size() - 1).getEquity());
+        BigDecimal totalReturn = finalCapital.subtract(initialCapital).divide(initialCapital, 4, RM);
+        BigDecimal maxDrawdown = calcMaxDrawdown(curve);
+
+        List<BacktestClosedTrade> closedTrades = result.getClosedTrades() == null ? List.of() : result.getClosedTrades();
         int winCount = 0;
         int lossCount = 0;
         BigDecimal totalProfit = BigDecimal.ZERO;
         BigDecimal totalLoss = BigDecimal.ZERO;
-        BigDecimal entryPrice = BigDecimal.ZERO;
-        boolean inPosition = false;
-
-        for (BacktestTradeRecord trade : trades) {
-            if (trade.getSignal() == Signal.BUY && !inPosition) {
-                entryPrice = trade.getPrice();
-                inPosition = true;
-            } else if (trade.getSignal() == Signal.SELL && inPosition) {
-                BigDecimal pnl = trade.getPrice().subtract(entryPrice);
-                capital = capital.add(pnl);
-
-                if (pnl.compareTo(BigDecimal.ZERO) > 0) {
-                    winCount++;
-                    totalProfit = totalProfit.add(pnl);
-                } else {
-                    lossCount++;
-                    totalLoss = totalLoss.add(pnl.abs());
-                }
-
-                if (capital.compareTo(maxCapital) > 0) maxCapital = capital;
-                BigDecimal drawdown = maxCapital.subtract(capital).divide(maxCapital, SCALE, RM);
-                if (drawdown.compareTo(maxDrawdown) > 0) maxDrawdown = drawdown;
-
-                LocalDate date = Instant.ofEpochMilli(trade.getTimestamp())
-                        .atZone(ZoneOffset.UTC).toLocalDate();
-                dailyPnl.merge(date, pnl, BigDecimal::add);
-                inPosition = false;
+        for (BacktestClosedTrade trade : closedTrades) {
+            BigDecimal pnl = trade.getNetPnl();
+            if (pnl.compareTo(BigDecimal.ZERO) > 0) {
+                winCount++;
+                totalProfit = totalProfit.add(pnl);
+            } else if (pnl.compareTo(BigDecimal.ZERO) < 0) {
+                lossCount++;
+                totalLoss = totalLoss.add(pnl.abs());
             }
         }
 
-        List<BigDecimal> dailyReturns = new ArrayList<>();
-        BigDecimal runCapital = initialCapital;
-        for (BigDecimal pnl : dailyPnl.values()) {
-            BigDecimal ret = runCapital.compareTo(BigDecimal.ZERO) == 0
-                    ? BigDecimal.ZERO
-                    : pnl.divide(runCapital, SCALE, RM);
-            dailyReturns.add(ret);
-            runCapital = runCapital.add(pnl);
-        }
+        List<BacktestDailyStats> dailyStats = buildDailyStatsFromEquity(curve, initialCapital, zoneId);
+        List<BigDecimal> dailyReturns = buildDailyReturnsFromEquity(curve, initialCapital, zoneId);
 
-        int totalTrades = winCount + lossCount;
+        int totalTrades = closedTrades.size();
         BigDecimal winRate = totalTrades > 0
                 ? BigDecimal.valueOf(winCount).divide(BigDecimal.valueOf(totalTrades), 4, RM)
                 : BigDecimal.ZERO;
         BigDecimal profitFactor = totalLoss.compareTo(BigDecimal.ZERO) > 0
                 ? totalProfit.divide(totalLoss, 4, RM)
                 : BigDecimal.ZERO;
-        BigDecimal totalReturn = capital.subtract(initialCapital).divide(initialCapital, 4, RM);
-        int days = dailyPnl.size();
+        int days = dailyStats.size();
         BigDecimal annualizedReturn = days > 0
                 ? totalReturn.multiply(TRADING_DAYS).divide(BigDecimal.valueOf(days), 4, RM)
                 : BigDecimal.ZERO;
 
         BacktestReport report = BacktestReport.builder()
                 .initialCapital(initialCapital)
-                .finalCapital(capital)
+                .finalCapital(finalCapital)
                 .totalReturn(totalReturn)
                 .annualizedReturn(annualizedReturn)
                 .totalTrades(totalTrades)
@@ -108,7 +93,7 @@ public class PerformanceAnalyzer {
                 .profitFactor(profitFactor)
                 .sharpeRatio(calcSharpe(dailyReturns))
                 .sortinoRatio(calcSortino(dailyReturns))
-                .dailyStats(buildDailyStats(dailyPnl, initialCapital))
+                .dailyStats(dailyStats)
                 .build();
 
         logReport(report);
@@ -117,52 +102,106 @@ public class PerformanceAnalyzer {
 
     private BigDecimal calcSharpe(List<BigDecimal> returns) {
         if (returns.size() < 2) return BigDecimal.ZERO;
-        BigDecimal mean = mean(returns);
-        BigDecimal std = std(returns, mean);
-        if (std.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
-        double sharpe = mean.divide(std, SCALE, RM).doubleValue() * Math.sqrt(365);
+        double mean = meanAsDouble(returns);
+        double std = stdAsDouble(returns, mean);
+        if (std == 0D) return BigDecimal.ZERO;
+        double sharpe = mean / std * Math.sqrt(365);
         return BigDecimal.valueOf(sharpe).setScale(4, RM);
     }
 
     private BigDecimal calcSortino(List<BigDecimal> returns) {
         if (returns.size() < 2) return BigDecimal.ZERO;
-        BigDecimal mean = mean(returns);
+        double mean = meanAsDouble(returns);
         List<BigDecimal> downside = returns.stream()
                 .filter(r -> r.compareTo(BigDecimal.ZERO) < 0)
                 .toList();
         if (downside.isEmpty()) return new BigDecimal("999.0000");
-        BigDecimal downStd = std(downside, BigDecimal.ZERO);
-        if (downStd.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
-        double sortino = mean.divide(downStd, SCALE, RM).doubleValue() * Math.sqrt(365);
+        double downStd = stdAsDouble(downside, 0D);
+        if (downStd == 0D) return BigDecimal.ZERO;
+        double sortino = mean / downStd * Math.sqrt(365);
         return BigDecimal.valueOf(sortino).setScale(4, RM);
     }
 
-    private BigDecimal mean(List<BigDecimal> list) {
-        return list.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
-                .divide(BigDecimal.valueOf(list.size()), SCALE, RM);
+    private double meanAsDouble(List<BigDecimal> list) {
+        return list.stream()
+                .mapToDouble(BigDecimal::doubleValue)
+                .average()
+                .orElse(0D);
     }
 
-    private BigDecimal std(List<BigDecimal> list, BigDecimal mean) {
-        BigDecimal sumSq = list.stream()
-                .map(r -> r.subtract(mean).pow(2))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return BigDecimal.valueOf(
-                Math.sqrt(sumSq.divide(BigDecimal.valueOf(list.size()), SCALE, RM).doubleValue()))
-                .setScale(SCALE, RM);
+    private double stdAsDouble(List<BigDecimal> list, double mean) {
+        double variance = list.stream()
+                .mapToDouble(BigDecimal::doubleValue)
+                .map(r -> Math.pow(r - mean, 2))
+                .average()
+                .orElse(0D);
+        return Math.sqrt(variance);
     }
 
-    private List<BacktestDailyStats> buildDailyStats(Map<LocalDate, BigDecimal> dailyPnl, BigDecimal initCapital) {
+
+    private BigDecimal calcMaxDrawdown(List<EquityPoint> curve) {
+        BigDecimal peak = curve.get(0).getEquity();
+        BigDecimal maxDrawdown = BigDecimal.ZERO;
+        for (EquityPoint point : curve) {
+            if (point.getEquity().compareTo(peak) > 0) {
+                peak = point.getEquity();
+            }
+            if (peak.compareTo(BigDecimal.ZERO) == 0) {
+                continue;
+            }
+            BigDecimal drawdown = peak.subtract(point.getEquity()).divide(peak, SCALE, RM);
+            if (drawdown.compareTo(maxDrawdown) > 0) {
+                maxDrawdown = drawdown;
+            }
+        }
+        return maxDrawdown;
+    }
+
+    private List<BacktestDailyStats> buildDailyStatsFromEquity(List<EquityPoint> curve, BigDecimal initCapital,
+                                                               ZoneId zoneId) {
+        Map<LocalDate, BigDecimal> dailyCloseEquity = new LinkedHashMap<>();
+        for (EquityPoint point : curve) {
+            LocalDate date = Instant.ofEpochMilli(point.getTimestampMs())
+                    .atZone(zoneId).toLocalDate();
+            dailyCloseEquity.put(date, point.getEquity());
+        }
+
         List<BacktestDailyStats> result = new ArrayList<>();
-        BigDecimal running = initCapital;
-        for (Map.Entry<LocalDate, BigDecimal> e : dailyPnl.entrySet()) {
-            BigDecimal ret = running.compareTo(BigDecimal.ZERO) == 0
+        BigDecimal previousEquity = initCapital;
+        for (Map.Entry<LocalDate, BigDecimal> entry : dailyCloseEquity.entrySet()) {
+            BigDecimal pnl = entry.getValue().subtract(previousEquity);
+            BigDecimal returnRate = previousEquity.compareTo(BigDecimal.ZERO) == 0
                     ? BigDecimal.ZERO
-                    : e.getValue().divide(running, 4, RM);
+                    : pnl.divide(previousEquity, 4, RM);
             result.add(BacktestDailyStats.builder()
-                    .date(e.getKey()).pnl(e.getValue()).returnRate(ret).build());
-            running = running.add(e.getValue());
+                    .date(entry.getKey())
+                    .pnl(pnl)
+                    .returnRate(returnRate)
+                    .build());
+            previousEquity = entry.getValue();
         }
         return result;
+    }
+
+    private List<BigDecimal> buildDailyReturnsFromEquity(List<EquityPoint> curve, BigDecimal initCapital,
+                                                         ZoneId zoneId) {
+        Map<LocalDate, BigDecimal> dailyCloseEquity = new LinkedHashMap<>();
+        for (EquityPoint point : curve) {
+            LocalDate date = Instant.ofEpochMilli(point.getTimestampMs())
+                    .atZone(zoneId).toLocalDate();
+            dailyCloseEquity.put(date, point.getEquity());
+        }
+
+        List<BigDecimal> returns = new ArrayList<>();
+        BigDecimal previousEquity = initCapital;
+        for (BigDecimal equity : dailyCloseEquity.values()) {
+            BigDecimal pnl = equity.subtract(previousEquity);
+            returns.add(previousEquity.compareTo(BigDecimal.ZERO) == 0
+                    ? BigDecimal.ZERO
+                    : pnl.divide(previousEquity, SCALE, RM));
+            previousEquity = equity;
+        }
+        return returns;
     }
 
     private BacktestReport emptyReport(BigDecimal initialCapital) {
@@ -173,6 +212,10 @@ public class PerformanceAnalyzer {
                 .winRate(BigDecimal.ZERO).maxDrawdown(BigDecimal.ZERO).profitFactor(BigDecimal.ZERO)
                 .sharpeRatio(BigDecimal.ZERO).sortinoRatio(BigDecimal.ZERO).dailyStats(List.of())
                 .build();
+    }
+
+    private BigDecimal scale(BigDecimal value) {
+        return value.setScale(SCALE, RM);
     }
 
     private void logReport(BacktestReport r) {

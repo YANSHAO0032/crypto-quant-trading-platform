@@ -163,8 +163,36 @@ java -jar quant-app/target/quant-app-1.0.0-SNAPSHOT.jar
 示例：
 
 ```bash
-curl -X POST "http://localhost:8080/api/quant/backtest/MA_CROSS?symbol=BTCUSDT&dataCount=2000&capital=100000"
+curl -X POST "http://localhost:8080/api/quant/backtest/MA_CROSS" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTCUSDT","dataCount":2000,"capital":100000}'
 ```
+
+Kline backtest supports capital-based sizing:
+
+```bash
+curl -X POST "http://localhost:8080/api/quant/backtest/PRO_RSI_MR/kline" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol":"BTCUSDT",
+    "interval":"1m",
+    "startMs":"1767196800000",
+    "endMs":"1782230400000",
+    "capital":5000,
+    "sizingMode":"EQUITY_PERCENT",
+    "equityPercent":0.2,
+    "allowPartialData":true,
+    "timezone":"Asia/Shanghai"
+  }'
+```
+
+`sizingMode` values:
+
+- `FIXED_QTY`: use `orderQuantity`; backward-compatible default is `0.001`.
+- `FIXED_NOTIONAL`: use `orderNotional / price`.
+- `EQUITY_PERCENT`: use `currentEquity * equityPercent / price`.
+
+When `allowPartialData=false`, kline backtests reject incomplete data coverage instead of silently truncating the requested range.
 
 策略 ID：`MA_CROSS`（双均线）、`RSI`、`GRID`（网格）
 
@@ -344,4 +372,3 @@ quant-app/
 ## License
 
 MIT
-
