@@ -53,7 +53,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3309/quant-trading-platform?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
-    password: 3196278
+    password: root
 ```
 
 ### 2. 初始化数据库
@@ -71,14 +71,6 @@ quant-app/src/main/resources/db/schema.sql
 应用启动时还会运行 `BacktestReportSchemaMigrator`，幂等补齐 `backtest_report` 的新增回测审计字段，兼容旧库。
 
 ### 3. 编译和运行
-
-```powershell
-$env:JAVA_HOME='C:\Users\10703\.jdks\ms-17.0.19'
-$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
-mvn -q test
-mvn -q -pl quant-app -am package -DskipTests
-java -jar quant-app/target/quant-app-1.0.0-SNAPSHOT.jar
-```
 
 默认端口：`http://localhost:8080`
 
@@ -106,7 +98,7 @@ POST /api/kline/import
 
 ```json
 {
-  "dataDir": "D:\\java_workspace\\btcdata",
+  "dataDir": "D:\\btcdata",
   "symbol": "BTCUSDT",
   "interval": "1m"
 }
@@ -382,28 +374,6 @@ risk:
 
 `backtest.fee-rate` 会进入 `BacktestAccount`，影响每笔成交后的现金、总手续费、闭合交易净盈亏和最终权益。
 
-## 测试
-
-项目已有回测资金模型、时间兼容、覆盖校验、绩效精度和 Controller 请求体测试。修改回测或接口时，至少跑全量测试一次。
-
-```powershell
-$env:JAVA_HOME='C:\Users\10703\.jdks\ms-17.0.19'
-$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
-mvn -q test
-```
-
-常见局部测试：
-
-```powershell
-mvn -q -pl quant-backtest -am test -Dtest=BacktestEngineSizingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false
-mvn -q -pl quant-api -am test -Dtest=QuantControllerRequestBodyTest -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-打包验证：
-
-```powershell
-mvn -q -pl quant-app -am package -DskipTests
-```
 
 ## 当前限制
 
