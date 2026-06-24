@@ -1,373 +1,360 @@
 # Crypto Quant Trading Platform
 
-基于 Spring Boot 3 的加密货币量化交易平台，支持实时行情订阅、多策略信号生成、五重风控管理、订单全生命周期管理及历史回测。
-
----
+基于 Spring Boot 3 和 Java 17 的加密货币量化交易平台，当前包含行情导入、策略运行、订单/账户/仓位管理和历史 K 线回测能力。
 
 ## 技术栈
 
-| 层次 | 技术 |
-|------|------|
-| 框架 | Spring Boot 3.2.5、Java 17 |
+| 层 | 技术 |
+| --- | --- |
+| 应用框架 | Spring Boot 3.2.5 |
+| 语言版本 | Java 17 |
 | ORM | MyBatis-Plus 3.5.5 |
-| 数据库 | MySQL 8.0 |
-| 网络 | OkHttp 4.12（WebSocket + REST） |
-| JSON | Fastjson2 2.0 |
+| 数据库 | MySQL 8 |
+| 交易所接入 | Binance REST / WebSocket |
 | 构建 | Maven 多模块 |
 
----
+## 模块
 
-## 模块结构
-
-```
-crypto-quant-trading-platform
-├── quant-common        # 公共模型、枚举（Order、Position、Trade、TickData、InOutOrder、KlineRange …）
-├── quant-market        # 行情层：Binance WebSocket 实时订阅、Tick 持久化、K 线范围索引
-├── quant-strategy      # 策略层：双均线、RSI、网格三种内置策略，完整生命周期钩子
-├── quant-risk          # 风控层：五重校验 + WalletManager 资金闭环
-├── quant-oms           # 订单管理：IOrderManager 接口 + 实盘/回测双实现 + 策略事件分发
-├── quant-execution     # 执行层：对接 Binance REST API 下单/撤单
-├── quant-backtest      # 回测引擎：历史 CSV 或模拟数据驱动策略，输出含 Sharpe/Sortino 的绩效报告
-├── quant-api           # REST 接口层（Spring MVC Controller）
-└── quant-app           # 启动入口、application.yml、schema.sql、ProductionScheduler
-```
-
----
-
-## 架构数据流
-
-```
-Binance WebSocket
-       ↓
-  Market Data Layer        — Tick 落库 + KlineRange 范围索引更新 + TickReceivedEvent 心跳
-       ↓
-  Strategy Engine          — 双均线 / RSI / 网格 → BUY / SELL / HOLD 信号
-                              onTick / onCheckExit / onOrderChange 三路回调
-       ↓
-  Risk Engine              — ① 参数校验 ② 仓位限制 ③ 下单频率
-                              ④ 单笔金额 ⑤ USDT 可用余额（WalletManager）
-       ↓
-  OMS（订单状态机）         — PENDING → SUBMITTED → FILLED / REJECTED
-                              资金冻结 / 解冻闭环，策略级持仓限额
-       ↓
-  Execution Engine         — Binance REST API 下单 / 撤单，状态变更实时落库
-
-  ProductionScheduler      — 仓位对账(5min) / 行情超时检测(1min)
-                              全局止损告警(5min) / 钱包快照(1h)
-```
-
----
-
-## 数据库表
-
-| 表名 | 说明 |
-|------|------|
-| `quant_order` | 订单表，记录订单全生命周期 |
-| `quant_position` | 仓位表，按交易对维护当前持仓量 |
-| `quant_trade` | 成交记录表，每笔成交写入一条 |
-| `quant_inout_order` | 进出一体交易记录，开/平仓绑定，含已实现盈亏和持仓时长 |
-| `tick_data` | 行情 Tick 数据表，支持多周期 |
-| `kline_range` | K 线数据范围索引，记录每个 symbol+interval 的起止时间戳 |
-| `backtest_report` | 回测报告表，记录绩效指标（含 Sharpe/Sortino） |
-| `backtest_trade_record` | 回测交易信号明细表 |
-
-初始化 SQL 见 [`quant-app/src/main/resources/db/schema.sql`](quant-app/src/main/resources/db/schema.sql)。
-
----
+| 模块 | 说明 |
+| --- | --- |
+| `quant-common` | 公共模型、枚举和上下文 |
+| `quant-market` | Binance 行情、Tick/Kline 持久化、K 线导入 |
+| `quant-strategy` | 内置策略和策略运行器 |
+| `quant-risk` | 风控、仓位、钱包管理 |
+| `quant-oms` | 订单管理和进出场记录 |
+| `quant-execution` | Binance 执行层 |
+| `quant-backtest` | 回测引擎、账户模拟、绩效分析 |
+| `quant-api` | REST API |
+| `quant-app` | 启动入口、配置、数据库 schema、启动迁移 |
 
 ## 快速启动
 
-### 1. 前置条件
+### 1. 准备环境
 
 - JDK 17+
 - Maven 3.8+
-- MySQL 8.0（本地或 Docker）
+- MySQL 8
 
-### 2. 建库
+本地默认开发库配置在 `quant-app/src/main/resources/application-dev.yml`：
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3309/quant-trading-platform?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: 3196278
+```
+
+### 2. 初始化数据库
 
 ```sql
 CREATE DATABASE `quant-trading-platform` DEFAULT CHARACTER SET utf8mb4;
 ```
 
-执行 `quant-app/src/main/resources/db/schema.sql` 初始化所有表。
+执行：
 
-### 3. 配置
-
-编辑 `quant-app/src/main/resources/application.yml`，按需修改数据库连接和 Binance API 密钥：
-
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/quant-trading-platform?...
-    username: root
-    password: your_password
-
-binance:
-  api-key: ${BINANCE_API_KEY:}      # 建议通过环境变量注入
-  secret-key: ${BINANCE_SECRET_KEY:}
+```text
+quant-app/src/main/resources/db/schema.sql
 ```
 
-也可通过环境变量注入：
+应用启动时还会运行 `BacktestReportSchemaMigrator`，幂等补齐 `backtest_report` 的新增回测审计字段，兼容旧库。
 
-```bash
-export BINANCE_API_KEY=your_api_key
-export BINANCE_SECRET_KEY=your_secret_key
-```
+### 3. 编译和运行
 
-### 4. 编译运行
-
-```bash
-mvn clean package -DskipTests
+```powershell
+$env:JAVA_HOME='C:\Users\10703\.jdks\ms-17.0.19'
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+mvn -q test
+mvn -q -pl quant-app -am package -DskipTests
 java -jar quant-app/target/quant-app-1.0.0-SNAPSHOT.jar
 ```
 
-或在 IDE 中直接运行 `com.quant.app.QuantApplication`。
+默认端口：`http://localhost:8080`
 
----
+## K 线数据
 
-## REST API
+### 导入 Binance 历史 K 线
 
-服务默认监听 `http://localhost:8080`。
+接口：
 
-### 订单接口
+```http
+POST /api/kline/import
+```
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/quant/orders` | 查询全部订单 |
-| GET | `/api/quant/orders/{orderId}` | 查询单笔订单 |
-| POST | `/api/quant/orders` | 创建订单 |
-| POST | `/api/quant/orders/{orderId}/submit` | 提交订单（触发五重风控） |
-| POST | `/api/quant/orders/{orderId}/cancel` | 取消订单（自动解冻资金） |
+请求体：
 
-### 策略接口
+```json
+{
+  "dataDir": "D:\\java_workspace\\btcdata",
+  "symbol": "BTCUSDT",
+  "interval": "1m"
+}
+```
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/quant/strategies` | 列出所有策略及运行状态 |
+当前导入逻辑会把 CSV/ZIP 中的 `open_time`、`close_time` 原样写入 `kline_{symbol}` 分表。Binance 历史文件可能混用毫秒、微秒或纳秒时间戳，因此回测读取侧做了兼容：
 
-### 回测接口
+- 13 位：毫秒，例如 `1577836800000`
+- 16 位：微秒，例如 `1780236300000000`
+- 19 位：纳秒
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/quant/backtest/{strategyId}` | 运行快速回测（模拟数据） |
+`KlineMapper.xml` 会同时查询毫秒、微秒、纳秒区间；`MarketTimeNormalizer` 会在 Java 侧统一归一化到毫秒，并按归一化后的 `openTime` 排序、去重。
 
-回测请求参数（Query String）：
+## 策略
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `symbol` | `BTCUSDT` | 交易对 |
-| `dataCount` | `1000` | 模拟 Tick 条数 |
-| `startPrice` | `65000` | 起始价格 |
-| `capital` | `100000` | 初始资金（USDT） |
+当前内置策略 ID：
+
+| ID | 策略 |
+| --- | --- |
+| `MA_CROSS` | 双均线交叉 |
+| `RSI` | RSI 超买超卖 |
+| `GRID` | 网格策略 |
+| `PRO_RSI_MR` | RSI + 均值回归 |
+
+策略接口只输出方向信号：`BUY`、`SELL`、`HOLD`。实际回测下单数量由回测引擎的仓位 sizing 模块计算。
+
+## 回测接口
+
+### 标准 K 线回测
+
+接口：
+
+```http
+POST /api/quant/backtest/{strategyId}/kline
+```
 
 示例：
 
 ```bash
-curl -X POST "http://localhost:8080/api/quant/backtest/MA_CROSS" \
-  -H "Content-Type: application/json" \
-  -d '{"symbol":"BTCUSDT","dataCount":2000,"capital":100000}'
-```
-
-Kline backtest supports capital-based sizing:
-
-```bash
-curl -X POST "http://localhost:8080/api/quant/backtest/PRO_RSI_MR/kline" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "symbol":"BTCUSDT",
-    "interval":"1m",
-    "startMs":"1767196800000",
-    "endMs":"1782230400000",
-    "capital":5000,
-    "sizingMode":"EQUITY_PERCENT",
-    "equityPercent":0.2,
-    "allowPartialData":true,
-    "timezone":"Asia/Shanghai"
+curl --location 'http://localhost:8080/api/quant/backtest/PRO_RSI_MR/kline' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "symbol": "BTCUSDT",
+    "interval": "1m",
+    "startMs": "1767196800000",
+    "endMs": "1782230400000",
+    "capital": 5000,
+    "sizingMode": "EQUITY_PERCENT",
+    "equityPercent": 0.2,
+    "allowPartialData": true,
+    "timezone": "Asia/Shanghai"
   }'
 ```
 
-`sizingMode` values:
+请求字段：
 
-- `FIXED_QTY`: use `orderQuantity`; backward-compatible default is `0.001`.
-- `FIXED_NOTIONAL`: use `orderNotional / price`.
-- `EQUITY_PERCENT`: use `currentEquity * equityPercent / price`.
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `symbol` | `BTCUSDT` | 交易对 |
+| `interval` | `1m` | K 线周期 |
+| `startMs` | 无 | 请求开始时间戳，毫秒 |
+| `endMs` | 无 | 请求结束时间戳，毫秒 |
+| `capital` | `100000` | 初始资金 |
+| `sizingMode` | `FIXED_QTY` | 仓位计算模式 |
+| `orderQuantity` | `0.001` | 固定数量模式的下单数量 |
+| `orderNotional` | 无 | 固定名义金额模式的每笔金额 |
+| `equityPercent` | 无 | 权益百分比模式的使用比例 |
+| `allowPartialData` | `false` | 是否允许数据不完整时继续回测 |
+| `timezone` | `Asia/Shanghai` | 日收益统计时区 |
 
-When `allowPartialData=false`, kline backtests reject incomplete data coverage instead of silently truncating the requested range.
+### 仓位 sizing 模式
 
-策略 ID：`MA_CROSS`（双均线）、`RSI`、`GRID`（网格）
+| 模式 | 计算方式 | 适用场景 |
+| --- | --- | --- |
+| `FIXED_QTY` | 使用 `orderQuantity` | 兼容旧逻辑，默认 `0.001` BTC |
+| `FIXED_NOTIONAL` | `orderNotional / price` | 每笔固定投入金额 |
+| `EQUITY_PERCENT` | `currentEquity * equityPercent / price` | 更接近真实资金使用 |
 
----
+反向信号会优先按当前仓位数量平仓，避免退出仓位时再次按权益比例重新计算数量。
 
-## 内置策略
+### 数据覆盖校验
 
-### 双均线交叉（MA_CROSS）
-- 短周期 MA(5) 上穿长周期 MA(20) → **买入**
-- 短周期 MA(5) 下穿长周期 MA(20) → **卖出**
+标准 K 线回测会比较请求区间和实际返回 K 线区间：
 
-### RSI 策略（RSI）
-- RSI(14) < 30 超卖 → **买入**
-- RSI(14) > 70 超买 → **卖出**
+- `allowPartialData=false`：数据不完整时返回 `400`
+- `allowPartialData=true`：继续回测，并在报告中返回 `coverageComplete=false`、`missingBars`、`coverageMessage`
 
-### 网格策略（GRID）
-- 在 `[lowerPrice, upperPrice]` 区间等间距划分网格
-- 价格下穿网格线 → **买入**，上穿网格线 → **卖出**
-- 默认区间 60000–70000，10 格，可通过配置覆盖：
+例如请求到 2026-06-24，但库里只有 2026-05-31 之前的数据时，接口会返回类似：
 
-```yaml
-strategy:
-  grid:
-    upper-price: 70000
-    lower-price: 60000
-    grid-count: 10
-```
-
-### 自定义策略开发
-
-实现 `Strategy` 接口，覆盖所需钩子：
-
-```java
-public class MyStrategy implements Strategy {
-
-    @Override
-    public Signal onTick(TickData tick) {
-        // 主逻辑：每个 Tick 返回交易信号
-        return Signal.HOLD;
-    }
-
-    @Override
-    public Signal onCheckExit(TickData tick) {
-        // 追踪止损、条件止盈等出场逻辑（每 Tick 触发）
-        return Signal.HOLD;
-    }
-
-    @Override
-    public void onOrderChange(Order order, OrderChangeType changeType) {
-        // 感知自己下的单是否成交，changeType：NEW/ENTER_FILL/EXIT_FILL/CANCELLED/REJECTED
-    }
+```json
+{
+  "success": false,
+  "message": "kline coverage incomplete: requested=[1767196800000,1782230400000], actual=[1767196800000,1780271999999], missingBars=32640"
 }
 ```
 
----
+### 最新 K 线回测
 
-## 风控体系
+接口：
 
-### 五重校验（按顺序逐层过滤）
-
-| 层级 | 校验内容 | 配置项 |
-|------|---------|--------|
-| ① | 订单参数合法性（symbol/price/qty/side 非空） | — |
-| ② | 单品种最大持仓量 | `risk.max-position` |
-| ③ | 每分钟最大下单次数（按策略 ID 计，每分钟自动重置） | `risk.max-order-per-minute` |
-| ④ | 单笔订单金额上限 | `risk.max-order-amount` |
-| ⑤ | USDT 可用余额充足性（WalletManager 实时校验） | — |
-
-### 策略级持仓限额
-
-```yaml
-order:
-  max-position-per-strategy: 3   # 每个策略最多同时持有 3 笔开仓订单
+```http
+POST /api/quant/backtest/{strategyId}/kline/latest
 ```
 
-### 资金流转闭环
+请求体：
 
-```
-下单提交  →  freeze(USDT, price × qty)   可用余额减少，冻结余额增加
-撤单      →  unfreeze(USDT, price × qty) 冻结余额归还可用
-成交      →  confirmTrade()              冻结扣除，目标资产 available 增加
-```
-
-### 全部风控配置
-
-```yaml
-risk:
-  max-order-amount: 100000       # 单笔最大金额（USDT）
-  max-position: 10               # 单品种最大持仓量
-  max-order-per-minute: 60       # 每分钟最大下单次数
-  fatal-loss-rate: 0.2           # 全局止损阈值（账户亏损 20% 时告警）
-  kline-timeout-seconds: 120     # 行情心跳超时秒数
+```json
+{
+  "symbol": "BTCUSDT",
+  "interval": "1m",
+  "limit": 500,
+  "capital": 100000
+}
 ```
 
----
+### 快速回测
 
-## 回测绩效指标
+接口：
 
-`PerformanceAnalyzer` 输出以下指标：
+```http
+POST /api/quant/backtest/{strategyId}
+```
 
-| 指标 | 说明 |
-|------|------|
+请求体：
+
+```json
+{
+  "symbol": "BTCUSDT",
+  "dataCount": 2000,
+  "startPrice": 65000,
+  "capital": 100000
+}
+```
+
+该接口优先从 `tick_data` 读取历史数据；如果没有数据，会生成模拟数据。
+
+### 查询回测报告
+
+```http
+GET /api/quant/backtest?strategyId=PRO_RSI_MR&limit=20
+```
+
+## 回测账户和绩效逻辑
+
+当前回测账户模型：
+
+- 每根 K 线都会执行 mark-to-market，形成连续权益曲线。
+- 每笔成交会影响 `cash`、`positionQty`、均价、手续费和已实现盈亏。
+- 多头买入会检查现金是否足够覆盖名义金额和手续费。
+- 空头开仓目前允许模拟，不做保证金和杠杆约束。
+- 手续费率来自 `backtest.fee-rate`，默认 `0.001`。
+- 初始权益点会写入权益曲线，避免最大回撤漏掉初始资金点。
+
+绩效分析基于权益曲线和闭合交易计算：
+
+| 字段 | 说明 |
+| --- | --- |
+| `initialCapital` / `finalCapital` | 初始和最终权益 |
 | `totalReturn` | 总收益率 |
-| `annualizedReturn` | 年化收益率（按实际交易天数折算 365 天） |
+| `annualizedReturn` | 按日数折算的年化收益 |
+| `totalTrades` | 闭合交易数量 |
 | `winRate` | 胜率 |
-| `maxDrawdown` | 最大回撤 |
-| `profitFactor` | 盈亏比（总盈利 / 总亏损） |
-| `sharpeRatio` | 年化夏普比率（无风险利率取 0） |
-| `sortinoRatio` | 年化索提诺比率（仅惩罚下行波动） |
-| `dailyStats` | 按日 PnL 及日收益率明细列表 |
+| `maxDrawdown` | 基于连续权益曲线的最大回撤 |
+| `profitFactor` | 盈亏比 |
+| `sharpeRatio` | 基于日收益的年化 Sharpe |
+| `sortinoRatio` | 基于下行波动的 Sortino |
+| `dailyStats` | 按 `timezone` 分组的每日 PnL 和日收益 |
+| `coverageComplete` / `missingBars` | 数据覆盖情况 |
+| `sizingMode` / `equityPercent` / `totalFee` | 回测审计字段 |
 
----
+Sharpe/Sortino 的均值和方差计算不会在中间步骤截断到 8 位，避免小收益策略被误算为 0。
 
-## 生产定时任务
+## 订单和策略运行接口
 
-`ProductionScheduler` 内置四个生产级监控任务：
+### 订单
 
-| 任务 | 周期 | 说明 |
-|------|------|------|
-| 仓位对账 | 5 分钟 | 输出本地持仓快照，对接交易所后可做差值告警 |
-| 行情超时检测 | 1 分钟 | 订阅 symbol 超过 `kline-timeout-seconds` 无行情则告警 |
-| 全局止损检查 | 5 分钟 | 账户亏损率超过 `fatal-loss-rate` 时输出 ERROR 级告警 |
-| 钱包快照日志 | 1 小时 | 记录所有资产的 available/frozen 余额快照 |
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/quant/orders` | 查询订单 |
+| `GET` | `/api/quant/orders/{orderId}` | 查询单笔订单 |
+| `POST` | `/api/quant/orders` | 创建订单 |
+| `POST` | `/api/quant/orders/{orderId}/submit` | 提交订单 |
+| `POST` | `/api/quant/orders/{orderId}/cancel` | 取消订单 |
 
-行情超时检测通过 `TickReceivedEvent` Spring 事件触发，与行情层完全解耦。
+创建订单示例：
 
----
-
-## 关键类说明
-
-```
-quant-common/
-└── model/   Order, Position, Trade, TickData, BacktestReport
-             InOutOrder   — 进出一体记录，含 realizedPnl 和持仓时长计算
-             KlineRange   — K 线数据范围索引，回测前快速判断数据是否充足
-└── enums/   OrderSide, OrderStatus, OrderType, Signal
-
-quant-market/
-└── BinanceMarketDataService   Tick 持久化 + KlineRange upsert + TickReceivedEvent 发布
-└── BinanceWebSocketClient     WebSocket 连接 + 断线 5 秒自动重连
-└── TickReceivedEvent          Spring 应用事件，解耦心跳更新
-
-quant-strategy/
-└── Strategy（接口）           onTick / onCheckExit / onOrderChange 三路钩子
-└── impl/MovingAverageStrategy, RsiStrategy, GridStrategy
-
-quant-risk/
-└── RiskEngine       五重风控入口
-└── RiskChecker      参数 / 仓位 / 频率 / 金额校验（每分钟 @Scheduled 重置计数）
-└── PositionManager  仓位读写（ON DUPLICATE KEY UPDATE）
-└── WalletManager    available/frozen 余额分离，freeze/unfreeze/confirmTrade 闭环
-
-quant-oms/
-└── IOrderManager        统一回测 / 实盘接口
-└── OrderManager         实盘实现：数据库持久化 + 资金冻结解冻
-└── BacktestOrderManager 回测实现：纯内存模拟撮合，SUBMITTED 立即 FILLED
-└── OrderStateMachine    合法状态转换定义
-└── OrderRepository      MyBatis-Plus 封装（insert or update）
-└── OrderService         策略级持仓限额 + onOrderChange 事件分发 + onExitFill 回调
-
-quant-execution/
-└── ExecutionService        订单发送 & 撤单，状态变更实时落库
-└── BinanceExchangeClient   Binance REST 客户端（API Key 由配置注入）
-
-quant-backtest/
-└── BacktestEngine      事务性驱动回放，结果写库
-└── DataLoader          CSV 加载 & 模拟数据生成
-└── PerformanceAnalyzer Sharpe / Sortino / 年化收益 / 按日分组统计
-
-quant-app/
-└── QuantApplication      启动入口
-└── ProductionScheduler   仓位对账 / 行情超时 / 全局止损 / 钱包快照四个定时任务
+```json
+{
+  "symbol": "BTCUSDT",
+  "side": "BUY",
+  "type": "LIMIT",
+  "price": 65000,
+  "quantity": 0.01,
+  "strategyId": "MANUAL"
+}
 ```
 
----
+### 策略运行
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/quant/strategies` | 查询策略列表 |
+| `POST` | `/api/quant/strategies/{strategyId}/start` | 启动策略 |
+| `POST` | `/api/quant/strategies/{strategyId}/stop` | 停止策略 |
+
+启动策略请求体：
+
+```json
+{
+  "symbol": "BTCUSDT"
+}
+```
+
+### 仓位、钱包和交易记录
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/quant/positions` | 查询全部仓位 |
+| `GET` | `/api/quant/positions/{symbol}` | 查询单交易对仓位 |
+| `GET` | `/api/quant/wallet` | 查询钱包快照 |
+| `GET` | `/api/quant/wallet/{asset}` | 查询单资产余额 |
+| `GET` | `/api/quant/trades/{strategyId}/open` | 查询未平仓进出场记录 |
+| `GET` | `/api/quant/trades/{strategyId}/closed` | 查询已平仓进出场记录 |
+| `GET` | `/api/quant/trades/{strategyId}/pnl` | 查询策略已实现盈亏 |
+
+## 关键配置
+
+```yaml
+strategy:
+  order-quantity: 0.001
+  rsi:
+    period: 14
+    oversold: 30
+    overbought: 70
+  ma:
+    short-period: 5
+    long-period: 20
+
+backtest:
+  fee-rate: 0.001
+
+risk:
+  max-order-amount: 100000
+  max-position: 10
+  max-order-per-minute: 60
+  fatal-loss-rate: 0.2
+  kline-timeout-seconds: 120
+```
+
+## 测试
+
+```powershell
+$env:JAVA_HOME='C:\Users\10703\.jdks\ms-17.0.19'
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+mvn -q test
+```
+
+常见局部测试：
+
+```powershell
+mvn -q -pl quant-backtest -am test -Dtest=BacktestEngineSizingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn -q -pl quant-api -am test -Dtest=QuantControllerRequestBodyTest -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+## 当前限制
+
+- 回测空头允许模拟开仓，但还没有保证金、杠杆、强平和资金费率模型。
+- `backtest_trade_record` 目前保存信号级明细；完整 fill、closed trade、equity curve 仍主要在内存计算中使用，尚未完整持久化。
+- 标准 K 线回测的覆盖校验只检查头尾区间缺口；区间内部缺失需要后续结合更细的连续性索引或逐 bar 校验。
 
 ## License
 
